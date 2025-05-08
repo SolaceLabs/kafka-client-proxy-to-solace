@@ -1,0 +1,5 @@
+# Test configs
+# May contain secrets
+src/test/resources/configs
+
+demo-producer/dependency-reduced-pom.xml

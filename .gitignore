@@ -32,3 +32,10 @@ libs/
 .idea
 log/
 bin/
+
+# macos
+.DS_Store
+
+# Test configs
+# May contain secrets
+src/test/resources/configs

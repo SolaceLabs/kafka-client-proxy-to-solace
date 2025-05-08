@@ -414,90 +414,6 @@ public class ProxyChannel {
 		ApiKeys apiKey = requestAndSize.request.apiKey();
 
 		switch (apiKey) {
-            case API_VERSIONS: {
-                if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
-                ApiVersionsResponse defaultApiVersionResponse = ApiVersionsResponse
-                        .defaultApiVersionsResponse(ApiMessageType.ListenerType.ZK_BROKER);
-                ApiVersionCollection apiVersions = new ApiVersionCollection();
-                for (ApiVersion apiVersion : defaultApiVersionResponse.data().apiKeys()) {
-                    // ApiVersion can NOT be reused in second ApiVersionCollection
-                    // due to the internal pointers it contains.
-                    apiVersions.add(apiVersion.duplicate());
-
-                }
-                ApiVersionsResponseData data = new ApiVersionsResponseData().setErrorCode(Errors.NONE.code())
-                        .setThrottleTimeMs(0).setApiKeys(apiVersions);
-                ApiVersionsResponse apiVersionResponse = new ApiVersionsResponse(data);
-                Send send = apiVersionResponse.toSend(requestHeader.toResponseHeader(), version);
-                dataToSend(send, apiKey);
-                break;
-            }
-            case SASL_HANDSHAKE: {
-                if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
-                if (requestHeader.apiVersion() >= 1) {
-                    // SASL Authenticate will be wrapped in a kafka request
-                    // Otherwise it will not be formatted as a kafka request
-                    enableKafkaSaslAuthenticateHeaders = true;
-                }
-                SaslHandshakeResponse saslHandshakeResponse = new SaslHandshakeResponse(
-                        new SaslHandshakeResponseData().setErrorCode(Errors.NONE.code()).setMechanisms(saslMechanisms));
-                Send send = saslHandshakeResponse.toSend(requestHeader.toResponseHeader(), version);
-                dataToSend(send, apiKey);
-                break;
-            }
-            case SASL_AUTHENTICATE: {
-                SaslAuthenticateRequest saslAuthenticateRequest = (SaslAuthenticateRequest) requestAndSize.request;
-                ProxyChannel.AuthorizationResult authResult = new ProxyChannel.AuthorizationResult(this, requestHeader);
-                inFlightRequestCount++;
-                try {
-                    session = proxySasl.authenticate(authResult, saslAuthenticateRequest.data().authBytes());
-                } catch (Exception e) {
-                    log.info("Sasl authentication failed: " + e);
-                    authorizationResult(requestHeader, false);
-                }
-                return false; // we are either waiting for authentication or could not even try to connect
-            }
-            case INIT_PRODUCER_ID: {
-            	log.warn("we got an INIT_PRODUCER_ID, this is currently unhandled");
-                if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
-                InitProducerIdRequest request = (InitProducerIdRequest)requestAndSize.request;
-                InitProducerIdRequestData requestData = request.data();
-//                data.
-//                request.
-                InitProducerIdResponseData responseData = new InitProducerIdResponseData()
-                		.setErrorCode(Errors.NONE.code())
-                		.setProducerId(requestData.producerId())
-                		.setProducerEpoch(requestData.producerEpoch());
-                InitProducerIdResponse response= new InitProducerIdResponse(responseData);
-                Send send = response.toSend(requestHeader.toResponseHeader(), version);
-                dataToSend(send, apiKey);
-            	break;
-            }
-            case METADATA: {
-                if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
-                MetadataRequest metadataRequest = (MetadataRequest) requestAndSize.request;
-                MetadataRequestData data = metadataRequest.data();
-                MetadataResponseData.MetadataResponsePartition partitionMetadata = new MetadataResponseData.MetadataResponsePartition()
-                        .setPartitionIndex(0).setErrorCode(Errors.NONE.code()).setLeaderEpoch(1).setLeaderId(0)
-                        .setReplicaNodes(Arrays.asList(0)).setIsrNodes(Arrays.asList(0))
-                        .setOfflineReplicas(Collections.emptyList());
-                List<MetadataResponseData.MetadataResponsePartition> partitionList = Collections
-                        .singletonList(partitionMetadata);
-                MetadataResponseData.MetadataResponseTopicCollection topics = new MetadataResponseData.MetadataResponseTopicCollection();
-                for (MetadataRequestData.MetadataRequestTopic topic : data.topics()) {
-                    MetadataResponseData.MetadataResponseTopic topicMetadata = new MetadataResponseData.MetadataResponseTopic()
-                            .setName(topic.name()).setErrorCode(Errors.NONE.code()).setPartitions(partitionList)
-                            .setIsInternal(false);
-                    topics.add(topicMetadata);
-                }
-                MetadataResponse metadataResponse = new MetadataResponse(
-                        new MetadataResponseData().setThrottleTimeMs(0).setBrokers(listenPort.brokers())
-                                .setClusterId(listenPort.clusterId()).setControllerId(0).setTopics(topics),
-                        version);
-                Send send = metadataResponse.toSend(requestHeader.toResponseHeader(), version);
-                dataToSend(send, apiKey);
-                break;
-            }
             case PRODUCE: {
                 ProduceRequest produceRequest = (ProduceRequest) requestAndSize.request;
                 // First we need to determine the number of topic records
@@ -536,37 +452,48 @@ public class ProxyChannel {
                         }
                         int recordCount = 0;
                         MemoryRecords records = (MemoryRecords) partitionData.records();
+
+
                         AbstractIterator<MutableRecordBatch> batchIt = records.batchIterator();
                         while (batchIt.hasNext()) {
                             recordCount++;
                             MutableRecordBatch batch = batchIt.next();
                             BufferSupplier.GrowableBufferSupplier supplier = new BufferSupplier.GrowableBufferSupplier();
-                            CloseableIterator<Record> recordIt = batch.streamingIterator(supplier);
-                            while (recordIt.hasNext()) {
-                                Record record = recordIt.next();
-                                final byte[] payload;
-                                if (record.hasValue()) {
-                                    payload = new byte[record.value().remaining()];
-                                    record.value().get(payload);
-                                } else {
-                                    payload = new byte[0];
-                                }
-                                final byte[] key;
-                                if (record.hasKey()) {
-                                    key = new byte[record.key().remaining()];
-                                    record.key().get(key);
-                                } else {
-                                    key = null;
-                                }
-                                final ProduceAckState produceAckState = new ProduceAckState(this, topicName,
-                                        topicResponseCollection, requestHeader, !recordIt.hasNext() /* lastInTopic */,
-                                        !recordIt.hasNext() && !it.hasNext());
-                                inFlightRequestCount++;
-                                topicResponseCollection = null;
-                                requestHeader = null;
-                                session.publish(topicName, payload, key, produceAckState);
-                            }
+
+							try(CloseableIterator<Record> recordIt = batch.streamingIterator(supplier);) {
+
+                            
+								while (recordIt.hasNext()) {
+									Record record = recordIt.next();
+									final byte[] payload;
+									if (record.hasValue()) {
+										payload = new byte[record.value().remaining()];
+										record.value().get(payload);
+									} else {
+										payload = new byte[0];
+									}
+									final byte[] key;
+									if (record.hasKey()) {
+										key = new byte[record.key().remaining()];
+										record.key().get(key);
+									} else {
+										key = null;
+									}
+									final ProduceAckState produceAckState = new ProduceAckState(this, topicName,
+											topicResponseCollection, requestHeader, !recordIt.hasNext() /* lastInTopic */,
+											!recordIt.hasNext() && !it.hasNext());
+									inFlightRequestCount++;
+									topicResponseCollection = null;
+									requestHeader = null;
+									session.publish(topicName, payload, key, produceAckState);
+								}
+
+							} catch (Exception e) {
+								throw e;
+							}
+
                         }
+						
                         // We do not want to deal with no records for a topic
                         if (recordCount == 0) {
                             throw new InvalidRequestException("No records in PRODUCE request, topic: " + topicName);
@@ -574,6 +501,90 @@ public class ProxyChannel {
                     }
                 }
                 break;
+            }
+            case METADATA: {
+                if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
+                MetadataRequest metadataRequest = (MetadataRequest) requestAndSize.request;
+                MetadataRequestData data = metadataRequest.data();
+                MetadataResponseData.MetadataResponsePartition partitionMetadata = new MetadataResponseData.MetadataResponsePartition()
+                        .setPartitionIndex(0).setErrorCode(Errors.NONE.code()).setLeaderEpoch(1).setLeaderId(0)
+                        .setReplicaNodes(Arrays.asList(0)).setIsrNodes(Arrays.asList(0))
+                        .setOfflineReplicas(Collections.emptyList());
+                List<MetadataResponseData.MetadataResponsePartition> partitionList = Collections
+                        .singletonList(partitionMetadata);
+                MetadataResponseData.MetadataResponseTopicCollection topics = new MetadataResponseData.MetadataResponseTopicCollection();
+                for (MetadataRequestData.MetadataRequestTopic topic : data.topics()) {
+                    MetadataResponseData.MetadataResponseTopic topicMetadata = new MetadataResponseData.MetadataResponseTopic()
+                            .setName(topic.name()).setErrorCode(Errors.NONE.code()).setPartitions(partitionList)
+                            .setIsInternal(false);
+                    topics.add(topicMetadata);
+                }
+                MetadataResponse metadataResponse = new MetadataResponse(
+                        new MetadataResponseData().setThrottleTimeMs(0).setBrokers(listenPort.brokers())
+                                .setClusterId(listenPort.clusterId()).setControllerId(0).setTopics(topics),
+                        version);
+                Send send = metadataResponse.toSend(requestHeader.toResponseHeader(), version);
+                dataToSend(send, apiKey);
+                break;
+            }
+            case SASL_HANDSHAKE: {
+                if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
+                if (requestHeader.apiVersion() >= 1) {
+                    // SASL Authenticate will be wrapped in a kafka request
+                    // Otherwise it will not be formatted as a kafka request
+                    enableKafkaSaslAuthenticateHeaders = true;
+                }
+                SaslHandshakeResponse saslHandshakeResponse = new SaslHandshakeResponse(
+                        new SaslHandshakeResponseData().setErrorCode(Errors.NONE.code()).setMechanisms(saslMechanisms));
+                Send send = saslHandshakeResponse.toSend(requestHeader.toResponseHeader(), version);
+                dataToSend(send, apiKey);
+                break;
+            }
+            case API_VERSIONS: {
+                if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
+                ApiVersionsResponse defaultApiVersionResponse = ApiVersionsResponse
+						.defaultApiVersionsResponse(ApiMessageType.ListenerType.ZK_BROKER);
+                ApiVersionCollection apiVersions = new ApiVersionCollection();
+                for (ApiVersion apiVersion : defaultApiVersionResponse.data().apiKeys()) {
+                    // ApiVersion can NOT be reused in second ApiVersionCollection
+                    // due to the internal pointers it contains.
+                    apiVersions.add(apiVersion.duplicate());
+
+                }
+                ApiVersionsResponseData data = new ApiVersionsResponseData().setErrorCode(Errors.NONE.code())
+                        .setThrottleTimeMs(0).setApiKeys(apiVersions);
+                ApiVersionsResponse apiVersionResponse = new ApiVersionsResponse(data);
+                Send send = apiVersionResponse.toSend(requestHeader.toResponseHeader(), version);
+                dataToSend(send, apiKey);
+                break;
+            }
+            case SASL_AUTHENTICATE: {
+                SaslAuthenticateRequest saslAuthenticateRequest = (SaslAuthenticateRequest) requestAndSize.request;
+                ProxyChannel.AuthorizationResult authResult = new ProxyChannel.AuthorizationResult(this, requestHeader);
+                inFlightRequestCount++;
+                try {
+                    session = proxySasl.authenticate(authResult, saslAuthenticateRequest.data().authBytes());
+                } catch (Exception e) {
+                    log.info("Sasl authentication failed: " + e);
+                    authorizationResult(requestHeader, false);
+                }
+                return false; // we are either waiting for authentication or could not even try to connect
+            }
+            case INIT_PRODUCER_ID: {
+            	log.warn("we got an INIT_PRODUCER_ID, this is currently unhandled");
+                if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
+                InitProducerIdRequest request = (InitProducerIdRequest)requestAndSize.request;
+                InitProducerIdRequestData requestData = request.data();
+//                data.
+//                request.
+                InitProducerIdResponseData responseData = new InitProducerIdResponseData()
+                		.setErrorCode(Errors.NONE.code())
+                		.setProducerId(requestData.producerId())
+                		.setProducerEpoch(requestData.producerEpoch());
+                InitProducerIdResponse response= new InitProducerIdResponse(responseData);
+                Send send = response.toSend(requestHeader.toResponseHeader(), version);
+                dataToSend(send, apiKey);
+            	break;
             }
             default: {
                 log.error("Unhanded request type: " + apiKey.toString());
