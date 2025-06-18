@@ -19,14 +19,17 @@ import java.util.List;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
-
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import java.io.IOException;
 
 import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.kafka.common.security.ssl.SslFactory;
-import org.apache.kafka.common.network.Mode;
 import org.apache.kafka.common.network.ListenerName;
 import org.apache.kafka.common.message.*;
 import org.apache.kafka.common.config.AbstractConfig;
@@ -34,7 +37,10 @@ import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.network.PlaintextTransportLayer;
 import org.apache.kafka.common.network.SslTransportLayer;
 import org.apache.kafka.common.network.TransportLayer;
-import org.apache.kafka.common.network.DefaultChannelMetadataRegistry;
+import org.apache.kafka.common.network.ChannelMetadataRegistry;
+import org.apache.kafka.common.network.CipherInformation;
+import org.apache.kafka.common.network.ClientInformation;
+import org.apache.kafka.common.network.ConnectionMode;      // Kafka >= 2.5 (recommended)
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,7 +77,7 @@ public class ProxyReactor extends Thread {
     }
     
     // Tracks state kept for each listen port
-    class ListenPort {
+    public class ListenPort {
         private final ListenEntry listenEntry;     // configuration for the listen port
         private final InetSocketAddress advertisedListenEntry; // optional IP/port advertised to clients
         private final ServerSocketChannel serverSocketChannel;
@@ -120,7 +126,8 @@ public class ProxyReactor extends Thread {
             if (listenEntry.getSecurityProtocol() == SecurityProtocol.PLAINTEXT) {
                 sslFactory = null;
             } else {
-                sslFactory = new SslFactory(Mode.SERVER);
+                // sslFactory = new SslFactory(Mode.SERVER);            // Kafka < 2.5
+                sslFactory = new SslFactory(ConnectionMode.SERVER);     // Kafka >= 2.5
                 sslFactory.configure(channelBuilderConfigs(config, null /* listenerName */));
             }
         }
@@ -155,9 +162,9 @@ public class ProxyReactor extends Thread {
             } else {
                 final String channelId = socketChannel.socket().getRemoteSocketAddress().toString();
                 return SslTransportLayer.create(channelId, key,
-                                                sslFactory.createSslEngine(socketChannel.socket().getInetAddress().getHostAddress(), 
+                                                sslFactory.createSslEngine(socketChannel.socket().getInetAddress().getHostAddress(),
                                                                            socketChannel.socket().getPort()),
-                                                new DefaultChannelMetadataRegistry());
+                                                new ProxyChannelMetadataRegistry());
             }
         }
         
@@ -207,13 +214,52 @@ public class ProxyReactor extends Thread {
         }
     }
 
+    /**
+     * Code taken from:
+     * https://github.com/apache/kafka/blob/trunk/clients/src/test/java/org/apache/kafka/common/network/DefaultChannelMetadataRegistry.java
+     * --> DefaultChannelDataRegistry is not public
+     */
+    static class ProxyChannelMetadataRegistry implements ChannelMetadataRegistry{
+
+        private CipherInformation cipherInformation;
+        private ClientInformation clientInformation;
+
+        ProxyChannelMetadataRegistry() { }
+
+        @Override
+        public void registerCipherInformation(final CipherInformation cipherInformation) {
+            this.cipherInformation = cipherInformation;
+        }
+
+        @Override
+        public CipherInformation cipherInformation() {
+            return this.cipherInformation;
+        }
+
+        @Override
+        public void registerClientInformation(final ClientInformation clientInformation) {
+            this.clientInformation = clientInformation;
+        }
+
+        @Override
+        public ClientInformation clientInformation() {
+            return this.clientInformation;
+        }
+
+        @Override
+        public void close() {
+            this.cipherInformation = null;
+            this.clientInformation = null;
+        }
+    }
+
     private static final Logger log = LoggerFactory.getLogger(ProxyReactor.class);
     private Selector selector;
     private boolean reactorRunning;
     private String clusterId;
     private final BlockingQueue<WorkEntry> workQueue;
     private ListenPort listenPorts[];
-    
+    private static ExecutorService requestHandlerExecutor;
     
     public ProxyReactor(ProxyConfig config, String clusterId) throws Exception {
         this.setName("Kafka_Proxy_Reactor");
@@ -243,6 +289,16 @@ public class ProxyReactor extends Thread {
                 throw new ConfigException("Could not create listener " + nextListenEntry.getEntryName() + " : " + e.toString());
         	}
         }
+        // Initialize the shared executor service if not already done
+        if (requestHandlerExecutor == null) {
+            int numThreads = config.getInt(ProxyConfig.REQUEST_HANDLER_THREADS_CONFIG);
+            log.info("Initializing request handler thread pool with {} threads.", numThreads);
+            ThreadFactory namedThreadFactory = new ThreadFactoryBuilder()
+                .setNameFormat("kafka-proxy-request-handler-%d")
+                .setDaemon(true) // Optional: make threads daemons
+                .build();
+            requestHandlerExecutor = Executors.newFixedThreadPool(numThreads, namedThreadFactory);
+        }
         reactorRunning = false;
     }
     
@@ -253,7 +309,8 @@ public class ProxyReactor extends Thread {
                 workQueue.put(workEntry);
                 selector.wakeup();
             } catch (InterruptedException e) {
-                close();
+                Thread.currentThread().interrupt(); // Preserve interrupt status
+                close("Reactor interrupted while adding to work queue.");
             }            
         }
     }
@@ -284,10 +341,30 @@ public class ProxyReactor extends Thread {
         }
     }
     
-    public void close() {
+    public static ExecutorService getRequestHandlerExecutor() {
+        return requestHandlerExecutor;
+    }
+
+    public void close(String reason) {
         log.info("Stopping reactor thread");
         reactorRunning = false;
-    	selector.wakeup();
+        if (selector.isOpen()) {
+            selector.wakeup(); // Interrupt the select() call
+        }
+
+        // Shutdown executor service
+        if (requestHandlerExecutor != null && !requestHandlerExecutor.isShutdown()) {
+            log.info("Shutting down request handler executor service...");
+            requestHandlerExecutor.shutdown();
+            try {
+                if (!requestHandlerExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    requestHandlerExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                requestHandlerExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     @Override
@@ -327,7 +404,7 @@ public class ProxyReactor extends Thread {
     	}
         
         closeAllListenPorts();
-        ProxyPubSubPlusClient.close();
+        ProxyPubSubPlusClient.close(); // Ensure this is safe to call multiple times or only once
         workQueue.clear();
     }
 }

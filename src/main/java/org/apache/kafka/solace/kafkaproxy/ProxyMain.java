@@ -21,6 +21,9 @@ import org.slf4j.LoggerFactory;
 
 public class ProxyMain {
     
+    private static final String KAFKA_PROPERTY_PREFIX = "kafka.proxy.";
+    private static final String SOLACE_PROPERTY_PREFIX = "solace.proxy.";
+
     private static final Logger log = LoggerFactory.getLogger(ProxyMain.class);
     private final String clusterId;
     
@@ -34,7 +37,7 @@ public class ProxyMain {
         log.debug("Cluster id: " + this.clusterId);
     }
     
-     private void startup(String args[]) {
+    private void startup(String args[]) {
         
         if (args.length <= 0) {
             log.warn("No properties file specified on command line");
@@ -47,11 +50,22 @@ public class ProxyMain {
             log.warn("Could not load properties file: " + ex);
             return;
         }
+
+        Properties solaceProperties = new Properties();
+        Properties kafkaProperties = new Properties();
+        for (Object key : props.keySet()) {
+            final String propName = (String) key;
+            if (propName.startsWith(SOLACE_PROPERTY_PREFIX)) {
+                solaceProperties.put(propName.substring(SOLACE_PROPERTY_PREFIX.length()), props.getProperty(propName));
+            } else if (propName.startsWith(KAFKA_PROPERTY_PREFIX)) {
+                kafkaProperties.put(propName.substring(KAFKA_PROPERTY_PREFIX.length()), props.getProperty(propName));
+            }
+        }
         
-        ProxyPubSubPlusClient.getInstance().configure(props);
+        ProxyPubSubPlusClient.getInstance().configure(solaceProperties);
         
         try {
-            final ProxyReactor proxyReactor = new ProxyReactor(new ProxyConfig(props), clusterId);
+            final ProxyReactor proxyReactor = new ProxyReactor(new ProxyConfig(kafkaProperties), clusterId);
             proxyReactor.start();
             proxyReactor.join();
         } catch (Exception e) {
@@ -59,14 +73,12 @@ public class ProxyMain {
         }
         log.info("Proxy no longer running");
     }
-  
+
      /**
      * @param args the command line arguments
      */
      public static void main(String[] args) {
         ProxyMain m = new ProxyMain();
         m.startup(args);
-
     }
-    
 }

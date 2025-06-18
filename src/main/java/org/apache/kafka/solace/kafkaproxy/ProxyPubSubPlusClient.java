@@ -7,8 +7,8 @@ package org.apache.kafka.solace.kafkaproxy;
  * you may not use this file except in compliance with the License.
  */
 
-
 import java.util.Properties;
+import java.util.UUID;
 import java.util.Map;
 import java.lang.Object;
 import java.util.Arrays;
@@ -21,7 +21,6 @@ import java.security.NoSuchAlgorithmException;
 import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 
 class ProxyPubSubPlusClient {
     private static final Logger log = LoggerFactory.getLogger(ProxyPubSubPlusClient.class);
@@ -93,6 +92,7 @@ class ProxyPubSubPlusClient {
                 byte[] username, byte[] password) {
         byte[] hostName = authResult.getProxyChannel().getHostName().getBytes();
         byte[] toHash = new byte[username.length + password.length + hostName.length];
+        // byte[] toHash = new byte[username.length + password.length + hostName.length + Integer.BYTES];
         int toHashIndex = 0;
         for (int i = 0; i < username.length; i++) {
             toHash[toHashIndex++] = username[i];
@@ -103,15 +103,28 @@ class ProxyPubSubPlusClient {
         for (int i = 0; i < hostName.length; i++) {
             toHash[toHashIndex++] = hostName[i];
         }
+
+
+
+
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             ByteArrayWrapper hashWrapper = new ByteArrayWrapper(md.digest(toHash));
             ProxyPubSubPlusSession session;
             synchronized (map) {
-                if (map.containsKey(hashWrapper)) {
-                    session = map.get(hashWrapper);
-                    session.addChannel(authResult.getProxyChannel());
-                } else {
+
+                /**
+                 * TODO - Handle sessions more smoothly here
+                 * Sessions are were being ID together by user + password + hostName as key
+                 * If the above matches, then use existing session - this won't work beyond POC
+                 */
+                hashWrapper = new ByteArrayWrapper(UUID.randomUUID().toString().getBytes());
+
+
+                // if (map.containsKey(hashWrapper)) {
+                //     session = map.get(hashWrapper);
+                //     session.addChannel(authResult.getProxyChannel());
+                // } else {
                     try {
                         session =  new ProxyPubSubPlusSession(
                                             baseServiceProps, authResult.getProxyChannel(),
@@ -121,7 +134,7 @@ class ProxyPubSubPlusClient {
                     }
                     map.put(hashWrapper, session);
                 }
-            }
+            // }
             // wipe out the pre-hashed information since it contains a password
             Arrays.fill(toHash, (byte)0);
             try {
@@ -135,6 +148,5 @@ class ProxyPubSubPlusClient {
             throw new SaslAuthenticationException("Authentication failed: could not hash authentication information: " + e);
         }
     }
-            
 }
 
