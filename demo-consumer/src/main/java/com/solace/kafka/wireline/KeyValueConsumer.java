@@ -41,6 +41,7 @@ public class KeyValueConsumer {
         options.addRequiredOption("c", "config", true, "Path to the Kafka consumer configuration file");
         options.addRequiredOption("t", "topic", true, "Name of the Kafka topic to consume from");
         options.addOption("g", "group-id", true, "Consumer group ID (defaults to a random UUID)");
+        options.addOption("p", "poll-time", true, "The polling time in milliseconds (default: 500)");
         options.addOption("h", "help", false, "Print this help message");
 
         CommandLineParser parser = new DefaultParser();
@@ -66,6 +67,16 @@ public class KeyValueConsumer {
         String configFilePath = cmd.getOptionValue("c");
         String topicName = cmd.getOptionValue("t");
         String groupId = cmd.getOptionValue("g", "consumer-group-" + UUID.randomUUID().toString());
+        long pollTimeMs = Long.parseLong(cmd.getOptionValue("p", "500"));
+
+        if (pollTimeMs < 100) {
+            logger.warn("Min poll time = 100ms, setting to 100ms");
+            pollTimeMs = 100;
+        }
+        if (pollTimeMs > 5_000) {
+            logger.warn("Max poll time = 5s, setting to 5s");
+            pollTimeMs = 5_000;
+        }
 
         Properties properties = new Properties();
         try (FileInputStream input = new FileInputStream(configFilePath)) {
@@ -113,12 +124,13 @@ public class KeyValueConsumer {
             System.out.println("Listening for messages on topic '" + topicName + "'. Press Ctrl+C to exit.");
 
             while (true) {
-                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500)); // Poll for 1 second
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(pollTimeMs)); // Poll for specified milliseconds
                 if (records.isEmpty() && !Thread.currentThread().isInterrupted()) {
                     // Optional: log if no records received for a while, or just continue polling
                 }
                 for (ConsumerRecord<String, String> record : records) {
-                    System.out.printf("KEY: %s - VALUE: %s (Partition: %d, Offset: %d)%n",
+                    // System.out.printf("KEY: %s - VALUE: %s (Partition: %d, Offset: %d)%n",
+                    System.out.printf("%s - %.60s (P[%02d] - %06d)%n",
                             record.key(), record.value(), record.partition(), record.offset());
                     logger.debug("Consumed record: key={}, value={}, partition={}, offset={}",
                             record.key(), record.value(), record.partition(), record.offset());
@@ -140,6 +152,7 @@ public class KeyValueConsumer {
                 consumer.close(Duration.ofSeconds(5)); // e.g., 5 seconds timeout
                 logger.info("Kafka consumer closed successfully from finally block.");
                 logger.info("Received {} messages.", receivedMessages);
+                System.out.println("Received " + receivedMessages + " messages.");
             } catch (Exception e) {
                 logger.error("Error during consumer.close() in finally block.", e);
             }

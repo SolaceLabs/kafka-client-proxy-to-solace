@@ -1,5 +1,76 @@
 # Running Producer Demo from command line
 
+
+
+## Run Proxy
+
+
+```bash
+
+cd ~/Development/Projects/kafka-facade/pubsubplus-client-proxy-kafka-producer
+
+java \
+  -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 \
+  -XX:G1HeapWastePercent=10 \
+  -jar target/kafka-wireline-proxy-1.2-SNAPSHOT-jar-with-dependencies.jar \
+  src/test/resources/configs/demo-proxy.properties
+
+
+## One line
+
+java -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 -jar target/kafka-wireline-proxy-1.2-SNAPSHOT-jar-with-dependencies.jar src/test/resources/configs/demo-proxy.properties
+
+
+```
+
+## Run Producer
+
+```bash
+
+cd ~/Development/Projects/kafka-facade/demo/producer
+
+### 150,000 messages to my/test/topic -- 20 Keys -- No Delay
+
+java -jar kafka-demo-producer-3.7.1.jar \
+  --config demo-producer.properties \
+  --topic PRODUCER_TOPIC:my/test/topic \
+  --input-file publish-data-kv-20-fixed.txt \
+  --num-records 250000 \
+  -d 0
+
+```
+
+## Run Consumers
+```bash
+
+## Consumer 3.3
+
+cd ~/Development/Projects/kafka-facade/demo/consumer3.3
+
+java -jar kafka-demo-consumer-3.3.1.jar -c demo-consumer.properties -g MYCONSUMER -t KAFKA_WIRELINE_QUEUE
+
+
+
+## Consumer 3.9
+
+cd ~/Development/Projects/kafka-facade/demo/consumer3.9
+
+java -jar kafka-demo-consumer-3.9.1.jar -c demo-consumer.properties -g MYCONSUMER -t KAFKA_WIRELINE_QUEUE
+
+
+
+## Consumer 2.5
+
+cd ~/Development/Projects/kafka-facade/demo/consumer2.5
+
+java -jar kafka-demo-consumer-2.5.1.jar -c demo-consumer.properties -g MYCONSUMER -t KAFKA_WIRELINE_QUEUE
+
+```
+
+
+
+
+
 ## Set path to use Kafka console commands
 *If not already set...*
 ```bash

@@ -34,4 +34,6 @@ public class OpConstants {
 
     public static final int         UNKNOWN_PARTITION_LEADER_EPOCH = -1;
 
+    public static final long        DEFAULT_MAX_UNCOMMITTED_MESSAGES_PER_FLOW = 2_500L;
+
 }

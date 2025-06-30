@@ -174,6 +174,7 @@ public class KafkaApiConsumerTools {
     private volatile Integer subscribedPartitionIndex;
 
     // Kafka-side cached values for fetch management
+    @Getter
     private volatile Integer cachedSessionId;
 
     private boolean firstSessionFetch;
@@ -206,6 +207,12 @@ public class KafkaApiConsumerTools {
 
     // TODO: Make partitionsPerTopic configurable
     private static int partitionsPerTopic = DEFAULT_PARTITIONS_PER_TOPIC;
+
+    private static int fetchSessionIdAssigner = 1_000;      // Start new fetch sessionId at 1000
+
+    private static synchronized int assignFetchSessionId() {
+        return fetchSessionIdAssigner++;
+    }
 
     /**
      * Call from Metadata connection to assign a new Partition Index if not already assigned
@@ -318,7 +325,7 @@ public class KafkaApiConsumerTools {
             try {
                 if (consumerToolsInstance.getSolaceQueueConsumer().isFlowActive()) {
                     final String subscribedQueue = consumerToolsInstance.getSolaceQueueConsumer().getQueueName();
-                    log.info("Unsubscribing from queue: {}", subscribedQueue);
+                    log.debug("Unsubscribing from queue: {}", subscribedQueue);
                     consumerToolsInstance.getSolaceQueueConsumer().stopQueueConsumer();
                     log.info("Unsubscribed from queue: {}", subscribedQueue);
                 }
@@ -362,6 +369,56 @@ public class KafkaApiConsumerTools {
         Uuid topicId;
         Integer partitionIndex;
 
+        /**
+         * TODO: Force consumers to re-join if consumerToolsInstance is null when receiving OffsetCommit and Heartbeat requests
+         * *** OR if group member Id is not found in mechanisms below (try this first)
+         * - When received OffsetCommit or HeartBeat request and KafkaApiConsumerTools instance is null on channel then
+         * - Return REBALANCE_IN_PROGRESS (kafka >= v2.5) -- Need ApiVersion
+         * - Return MEMBER_ID_NOT_FOUND (kafka < v2.5) -- Need ApiVersion
+         * --> If this works, it should cause consumers to re-join
+         * 
+         * TODO: make sure that if sessionId != cached session Id, then return FETCH_SESSION_ID_NOT_FOUND
+
+         * TODO: Lookup consumerToolsInstance by sessionId
+         * - Add ConsumerToolsKey to KafkaApiConsumerTools
+         * - When finding new key in map indexed by ConsumerToolsKey, set KafkaApiConsumerTools.savedConsumerToolsKey = the new key (security)
+         * 
+         * Create sessionId (int) --> KafkaApiConsumerTools Map (consumerInstancesBySessionId)
+         * - Get sessionId from Fetch request --> If found and >= 1000, use sessionId to get KafkaApiConsumerTools instance from map
+         * - AND check that ConsumerToolsKey matches (security)
+         * - If found and matches, return KafkaApiConsumerTools
+         * 
+         * Check if sessionId changes in fetch session, if it does:
+         * - find sessionId in consumerInstancesBySessionId map
+         * - Add the newSessionId --> KafkaConsumerToolsKey instance
+         * - Remove the old sessionId key
+         */
+
+        /**
+         * TODO: Lookup consumerToolsInstace by groupMemberId
+         * Create group memberId (string) --> KafkaConsumerTools Map (consumerInstancesByGroupMemberId)
+         * - When assigning a new Group member Id, (Join Group, SyncGroup), add memberId --> KafkaApiConsumerTools instance to map
+         * - When handling LeaveGroup, use memberId to remove memberId
+         * - AND get cachedSessionId and try to remove reference in map cachedSessionId --> consumerInstancesBySessionId
+         * 
+         * When handling Heartbeat and OffsetCommit requests and consumerToolsInstance is NULL
+         * - Get group member Id from request
+         * - If group memberId is not null and size > X
+         * - lookup consumerTools instance using memberId in consumerInstancesByGroupMemberId map
+         * - AND check that ConsumerToolsKey matches (security)
+         * - If found and ConsumerToolsKey matches, return KafkaApiConsumerTools instance
+         */
+        /**
+         * TODO: Handle stale consumerToolsInstances in separate thread (manage potential memory leaks)
+         * - If consumer does not exit cleanly, then LeaveGroup may not be called leaving stale instances
+         * - This can be quite large if there are many uncommitted messages or bytes
+         * - create lastCalledTimestamp (long) entry on KafkaApiConsumerTools
+         * - update timestamp with each Fetch, Heartbeat, and OffsetCommit request
+         * - In separate cleanup thread, check last called for both + check for object in channels
+         * - If threshold exceeded AND not found in live channel, then attempt to CLOSE and DELETE instance
+         * 
+         */
+
         try {
             if (request instanceof FetchRequest) {
                 final FetchRequest fetchRequest = (FetchRequest)request;
@@ -375,6 +432,9 @@ public class KafkaApiConsumerTools {
                 }
                 partitionIndex = fetchRequest.data().topics().get(0).partitions().get(0).partition();
             } else if (request instanceof OffsetsForLeaderEpochRequest) {
+                // TODO: Evaluate if this request should be here - may be best handled as a static request and always assign
+                // consumer group instance on first fetch request
+                // If we should assign here, then eveluate if ListOffsets should also be handled here.
                 final OffsetsForLeaderEpochRequest offsetsRequest = (OffsetsForLeaderEpochRequest)request;
                 final OffsetForLeaderTopic offsetForLeaderTopic = offsetsRequest.data().topics().iterator().next();
                 topicName = offsetForLeaderTopic.topic();
@@ -392,6 +452,11 @@ public class KafkaApiConsumerTools {
         }
         final ConsumerToolsKey key = new ConsumerToolsKey(clientId, topicId, partitionIndex);
         if (consumerInstances.containsKey(key) && consumerInstances.get(key).peek() != null) {
+            /**
+             * TODO: Ensure that we don't receive a stale instance in the hand-off
+             * May require either a separate processor to check and discard stale instances
+             * OR check queued timestamp and discard if > threshold
+             */
             return consumerInstances.get(key).poll();
         } else {
             log.error("No Consumer Flow to Assign");
@@ -465,7 +530,7 @@ public class KafkaApiConsumerTools {
                 sessionId = requestData.sessionId();
                 if (sessionId == 0 && subscribed) {
                     // Create new session Id
-                    sessionId = (int)UUID.randomUUID().getMostSignificantBits();
+                    sessionId = assignFetchSessionId();
                 }
             }
             if (sessionFetch) {
@@ -616,7 +681,7 @@ public class KafkaApiConsumerTools {
                     minBytesThresholdMet = true;
                 }
                 remainingTime = (int)(endTimestamp - Time.SYSTEM.milliseconds());
-                dataToReturn = dataToReturn ? dataToReturn : true;
+                dataToReturn = true;
             }
             memoryRecords = builder.build();
 
@@ -1261,6 +1326,9 @@ public class KafkaApiConsumerTools {
             addAvailableConsumerToolsEntry(new ConsumerToolsKey(clientId, this.subscribedTopicId, partitionIndex), this);
             log.info("Subscribed to queue: {}", queueName);
         } catch (Exception exc) {
+            /**
+             * TODO: Return a better error here
+             */
             log.error("Failed to subscribe to solace queue: {} -- Exception: {}", queueName, exc.getLocalizedMessage());
             return request.getErrorResponse(0, new UnknownServerException(Errors.UNKNOWN_SERVER_ERROR.message() + " - Subscription to solace queue failed"));
         }

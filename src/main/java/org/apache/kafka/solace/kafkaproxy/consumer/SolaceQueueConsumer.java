@@ -40,6 +40,8 @@ import java.util.concurrent.ConcurrentSkipListMap;
 
 import org.apache.kafka.common.errors.OffsetOutOfRangeException;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.solace.kafkaproxy.util.OpConstants;
+import org.slf4j.event.Level;
 
 @Slf4j
 public class SolaceQueueConsumer {
@@ -53,6 +55,8 @@ public class SolaceQueueConsumer {
     private Queue queue;
 
     private FlowReceiver flowReceiver;
+
+    private static long maxUncommittedMessagesPerFlow = OpConstants.DEFAULT_MAX_UNCOMMITTED_MESSAGES_PER_FLOW;
 
     private volatile Long receivedOffset = -1L;          // # Received messages
 
@@ -121,11 +125,24 @@ public class SolaceQueueConsumer {
     ) throws SolaceMessageEntryException
     {
         if (!consumerFlowActive) {
-            // Let's be more graceful, Probably shutting down
+            // Probably shutting down
             return null;
         }
         if (fetchOffset <= this.committedOffset) {
+            // Invlalid Offset
             throw new SolaceMessageEntryException(Errors.OFFSET_OUT_OF_RANGE, "Offset has been committed and is no longer available");
+        }
+        if (receivedOffset - committedOffset >= maxUncommittedMessagesPerFlow) {
+            // Too many uncommitted messages
+            try {
+                log.info("Throttling message fetch, uncommitted message count: {}", receivedOffset - committedOffset);
+                // We wait here to throttle the next request
+                Thread.sleep(waitTimeMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Thread interrupted while waiting for commit. Probably shutting down", e);
+            }
+            return null; // Do not try to return a message
         }
         try {
             if (fetchOffset <= receivedOffset && fetchOffset > this.committedOffset && this.receivedMessages.containsKey(fetchOffset)) {
@@ -236,32 +253,41 @@ public class SolaceQueueConsumer {
             log.debug("Attempted to delete committed messages but flow is INACTIVE");
             return;
         }
-        ConcurrentNavigableMap<Long, SolaceMessageEntry> messagesToDelete = 
+        final ConcurrentNavigableMap<Long, SolaceMessageEntry> messagesToDelete = 
                 receivedMessages.headMap(
                     this.committedOffset, 
                     true
                 );
         if (messagesToDelete.isEmpty()) {
-            log.trace("No messages to delete");
+            log.trace("No committed messages to delete");
             return;
         }
         final Long now = System.currentTimeMillis();
-        int deletedMessagesCount = 0;
+        int deletedMessagesCount = 0, missingMessageCount = 0;
         final long lastKey = messagesToDelete.lastKey();
         for (long key = messagesToDelete.firstKey(); key <= lastKey; key++) {
             if (!messagesToDelete.containsKey(key) ) {
                 continue;
             }
             if (messagesToDelete.get(key).eligibleForDeletion(now)) {
-                deletedMessagesCount++;
+                try {
+                    messagesToDelete.remove(key);
+                    deletedMessagesCount++;
+                } catch (Exception exc) {
+                    missingMessageCount++;
+                    log.trace("Error deleting message from memory: {}", exc.getLocalizedMessage());
+                }
             } else {
                 break;
             }
         }
-        if (deletedMessagesCount > 0) {
-            log.trace("Deleted {} committed messages from memory", deletedMessagesCount);
+        if (deletedMessagesCount > 0 || missingMessageCount > 0) {
+            log.atLevel(missingMessageCount > 0 ? Level.WARN : Level.TRACE).log(
+                "Deleted {} committed messages from memory; {} missing messages not deleted", 
+                deletedMessagesCount,
+                missingMessageCount);
         } else {
-            log.trace("No committed messages to delete");
+            log.trace("No committed messages eligible to delete");
         }
     }
 
@@ -325,6 +351,7 @@ public class SolaceQueueConsumer {
         // TODO - the following cases must be implemented
         @Override
         public void handleEvent(Object source, FlowEventArgs event) {
+            log.info("Solace Consumer Flow for Queue [{}] is {}", queueName, event.getEvent().toString());
             switch (event.getEvent()) {
                 case FLOW_ACTIVE: {
                     consumerFlowActive = true;
@@ -349,7 +376,6 @@ public class SolaceQueueConsumer {
                 }
                 default:
             }
-            log.info("Solace Consumer Flow for Queue [{}] is {}", queueName, event.getEvent().toString());
         }
     }
 

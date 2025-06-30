@@ -24,8 +24,11 @@ import org.apache.commons.cli.*;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.sql.Time;
+import java.time.Duration;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.io.FileInputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -152,6 +155,7 @@ public class KeyValueProducer {
 
             logger.info("Starting to send messages to topic '{}'. Press Ctrl+C to exit.", topicName);
             int lineIndex = 0;
+
             // Main loop for sending messages
             while (true) {
                 if (Thread.currentThread().isInterrupted()) {
@@ -178,14 +182,13 @@ public class KeyValueProducer {
                 producer.send(record, (metadata, exception) -> {
                     if (exception == null) {
                         // Log less verbosely for successful sends, or use TRACE/DEBUG
-                        logger.info("SENT {} : {}",
-                                key, value);
+                        logger.info("SENT {} : {} - {}",
+                                key, String.format("%.50s", value), String.format("%06d", totalMessagesSent++));
                     } else {
                         logger.error("Error sending record (key={}, value={})", key, value, exception);
                         // If the send error is due to an interruption, the main loop's interrupt check will handle it.
                     }
                 });
-                totalMessagesSent++;
                 
                 if (delay > 0) {
                     try {
@@ -203,7 +206,7 @@ public class KeyValueProducer {
             logger.debug("Flushing remaining messages...");
             producer.flush();
             logger.debug("All messages flushed.");
-            producer.close(Long.MAX_VALUE);
+            producer.close(Duration.ofMillis(5000L));
 
         } catch (org.apache.kafka.common.errors.InterruptException e) { // Kafka's specific runtime interrupt exception
             logger.warn("Kafka operation (e.g., flush or close) was interrupted.", e);

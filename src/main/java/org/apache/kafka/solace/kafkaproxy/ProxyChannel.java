@@ -449,8 +449,9 @@ public class ProxyChannel {
             inFlightRequestCount++;
 			try {
 				session = proxySasl.authenticate(authResult, clientToken);
-				authorizationResult(null, true);
+				// authorizationResult(null, true);				// This will report success before authentication completes
 			} catch (Exception e) {
+				inFlightRequestCount--; // Decrement since the async operation could not be started
 				log.info("Sasl authentication failed: " + e);
 				authorizationResult(null, false);
 			}
@@ -469,13 +470,7 @@ public class ProxyChannel {
 			try {
 				requestAndSize = AbstractRequest.parseRequest(apiKey, apiVersion, buffer);
 			} catch (Throwable ex) {
-
-
-
 				log.trace("Error thrown handing request: {}, v={}, ex", API_VERSIONS.name(), apiVersion, ex);
-
-
-
 				throw new InvalidRequestException(
 						"Error getting request for apiKey: " + apiKey + ", apiVersion: " + header.apiVersion(), ex);
 			}
@@ -814,8 +809,8 @@ public class ProxyChannel {
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
 				
 				log.debug("Creating KafkaApiConsumerTools in handleRequest method with 'JOIN_GROUP' request");
-				// If we are seeing, join group, we are about to subscribe. There should not be a consumer flow at this point
-				// But stop gracefully if that is not the case
+				// If we are seeing joingroup request then we are about to subscribe. 
+				// There may be an active consumer flow at this case if a rebalance operation
 				KafkaApiConsumerTools.stopConsumerFlowIfRunning(kafkaApiConsumerTools);
 
 				try {
@@ -970,6 +965,7 @@ public class ProxyChannel {
 					// Stop flow gracefully if it is running as the next step will replace it (should not happen)
                     session = proxySasl.authenticate(authResult, saslAuthenticateRequest.data().authBytes());
                 } catch (Exception e) {
+                    inFlightRequestCount--; // Decrement since the async operation could not be started
                     log.info("Sasl authentication failed: " + e);
                     authorizationResult(requestHeader, false);
                 }
@@ -1093,6 +1089,8 @@ public class ProxyChannel {
             log.info("Cleaning up channel (remote " + transportLayer.socketChannel().socket().getRemoteSocketAddress()
                     + ") due to " + reason);
         }
+		KafkaApiConsumerTools.stopConsumerFlowIfRunning(kafkaApiConsumerTools);		// Stop consumer gracefully if still running
+		kafkaApiConsumerTools = null;
 		listenPort.removeChannel(this);
 		if (session != null) {
 			session.removeChannel(this);

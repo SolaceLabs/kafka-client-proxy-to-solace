@@ -61,6 +61,8 @@
                 <artifactId>maven-assembly-plugin</artifactId>
                 <version>3.6.0</version> <!-- Updated to a more recent version -->
                 <configuration>
+                    <finalName>${project.artifactId}-${kafka.version}</finalName>
+                    <appendAssemblyId>false</appendAssemblyId>
                     <archive>
                         <manifest>
                             <mainClass>com.solace.kafka.wireline.KeyValueConsumer</mainClass>
