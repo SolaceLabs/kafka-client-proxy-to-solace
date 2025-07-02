@@ -14,8 +14,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.kafka.solace.kafkaproxy.consumer;
+package com.solace.kafka.kafkaproxy.consumer;
 
+import com.solace.kafka.kafkaproxy.util.OpConstants;
 import com.solacesystems.jcsmp.BytesXMLMessage;
 import com.solacesystems.jcsmp.ConsumerFlowProperties;
 import com.solacesystems.jcsmp.EndpointProperties;
@@ -40,7 +41,6 @@ import java.util.concurrent.ConcurrentSkipListMap;
 
 import org.apache.kafka.common.errors.OffsetOutOfRangeException;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.solace.kafkaproxy.util.OpConstants;
 import org.slf4j.event.Level;
 
 @Slf4j

@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.kafka.solace.kafkaproxy.util;
+package com.solace.kafka.kafkaproxy.util;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;

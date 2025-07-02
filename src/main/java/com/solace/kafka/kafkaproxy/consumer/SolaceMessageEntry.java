@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.kafka.solace.kafkaproxy.consumer;
+package com.solace.kafka.kafkaproxy.consumer;
 
 import com.solacesystems.jcsmp.BytesXMLMessage;
 import com.solacesystems.jcsmp.XMLMessage;
