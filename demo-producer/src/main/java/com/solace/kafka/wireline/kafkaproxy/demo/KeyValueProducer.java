@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.solace.kafka.wireline;
+package com.solace.kafka.kafkaproxy.demo;
 
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -179,16 +179,18 @@ public class KeyValueProducer {
                 }
                 final String key = k, value = v;
                 final ProducerRecord<String, String> record = new ProducerRecord<>(topicName, key, value);
+                final long sentCount = totalMessagesSent;
                 producer.send(record, (metadata, exception) -> {
                     if (exception == null) {
                         // Log less verbosely for successful sends, or use TRACE/DEBUG
                         logger.info("SENT {} : {} - {}",
-                                key, String.format("%.50s", value), String.format("%06d", totalMessagesSent++));
+                                key, String.format("%.50s", value), String.format("%06d", sentCount));
                     } else {
                         logger.error("Error sending record (key={}, value={})", key, value, exception);
                         // If the send error is due to an interruption, the main loop's interrupt check will handle it.
                     }
                 });
+                totalMessagesSent++;
                 
                 if (delay > 0) {
                     try {

@@ -150,7 +150,7 @@
         <configuration>
           <archive>
             <manifest>
-              <mainClass>org.apache.kafka.solace.kafkaproxy.ProxyMain</mainClass>
+              <mainClass>com.solace.kafka.kafkaproxy.ProxyMain</mainClass>
               <addClasspath>true</addClasspath>
             </manifest>
           </archive>

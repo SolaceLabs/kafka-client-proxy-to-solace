@@ -1,4 +1,4 @@
-package org.apache.kafka.solace.kafkaproxy;
+package com.solace.kafka.kafkaproxy;
 
 /*
  * Copyright 2021 Solace Corporation. All rights reserved.
@@ -26,6 +26,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 import java.io.IOException;
 
 import org.apache.kafka.common.security.auth.SecurityProtocol;

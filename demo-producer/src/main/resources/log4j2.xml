@@ -5,18 +5,18 @@
             <!-- <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/> -->
             <PatternLayout pattern="%-5level - %msg%n"/>
         </Console>
-        <File name="File" fileName="logs/application.log">
+        <!-- <File name="File" fileName="logs/application.log">
             <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{1} - %msg%n"/>
-        </File>
+        </File> -->
     </Appenders>
     <Loggers>
         <Root level="info">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="File"/>
         </Root>
-        <Logger name="com.solace.kafka.wireline.KeyValueProducer" level="info" additivity="false">
+        <Logger name="com.solace.kafka.kafkaproxy.demo.KeyValueProducer" level="info" additivity="false">
             <AppenderRef ref="Console" />
-            <AppenderRef ref="File" />
+            <!-- <AppenderRef ref="File" /> -->
         </Logger>
     </Loggers>
 </Configuration>

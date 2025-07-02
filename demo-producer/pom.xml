@@ -77,7 +77,7 @@
                             <transformers>
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.solace.kafka.wireline.KeyValueProducer</mainClass> </transformer>
+                                    <mainClass>com.solace.kafka.kafkaproxy.demo.KeyValueProducer</mainClass> </transformer>
                             </transformers>
                             <artifactSet>
                                 <excludes>

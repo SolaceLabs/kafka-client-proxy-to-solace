@@ -65,7 +65,7 @@
                     <appendAssemblyId>false</appendAssemblyId>
                     <archive>
                         <manifest>
-                            <mainClass>com.solace.kafka.wireline.KeyValueConsumer</mainClass>
+                            <mainClass>com.solace.kafka.kafkaproxy.demo.KeyValueConsumer</mainClass>
                         </manifest>
                     </archive>
                     <descriptorRefs>

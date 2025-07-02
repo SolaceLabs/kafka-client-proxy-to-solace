@@ -1,4 +1,4 @@
-package org.apache.kafka.solace.kafkaproxy;
+package com.solace.kafka.kafkaproxy;
 
 /*
  * Copyright 2021 Solace Corporation. All rights reserved.
@@ -73,13 +73,14 @@ import org.apache.kafka.common.requests.SyncGroupRequest;
 import org.apache.kafka.common.utils.AbstractIterator;
 import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.CloseableIterator;
-import org.apache.kafka.solace.kafkaproxy.consumer.KafkaApiConsumerTools;
-import org.apache.kafka.solace.kafkaproxy.consumer.SupportedApiVersions;
-import org.apache.kafka.solace.kafkaproxy.util.OpConstants;
-import org.apache.kafka.solace.kafkaproxy.util.ProxyUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
+
+import com.solace.kafka.kafkaproxy.consumer.KafkaApiConsumerTools;
+import com.solace.kafka.kafkaproxy.consumer.SupportedApiVersions;
+import com.solace.kafka.kafkaproxy.util.OpConstants;
+import com.solace.kafka.kafkaproxy.util.ProxyUtils;
 
 public class ProxyChannel {
 	private static final Logger log = LoggerFactory.getLogger(ProxyChannel.class);

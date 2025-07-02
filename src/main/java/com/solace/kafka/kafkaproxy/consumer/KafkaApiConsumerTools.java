@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.kafka.solace.kafkaproxy.consumer;
+package com.solace.kafka.kafkaproxy.consumer;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -108,11 +108,11 @@ import org.apache.kafka.common.requests.RequestHeader;
 import org.apache.kafka.common.requests.SyncGroupRequest;
 import org.apache.kafka.common.requests.SyncGroupResponse;
 import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.solace.kafkaproxy.ProxyReactor.ListenPort;
-import org.apache.kafka.solace.kafkaproxy.consumer.SolaceQueueConsumer.SolaceMessageEntryException;
-import org.apache.kafka.solace.kafkaproxy.util.OpConstants;
-import org.apache.kafka.solace.kafkaproxy.util.ProxyUtils;
 
+import com.solace.kafka.kafkaproxy.ProxyReactor.ListenPort;
+import com.solace.kafka.kafkaproxy.consumer.SolaceQueueConsumer.SolaceMessageEntryException;
+import com.solace.kafka.kafkaproxy.util.OpConstants;
+import com.solace.kafka.kafkaproxy.util.ProxyUtils;
 // import com.solacesystems.common.util.Topic;
 import com.solacesystems.jcsmp.JCSMPSession;
 import com.solacesystems.jcsmp.JCSMPStateException;

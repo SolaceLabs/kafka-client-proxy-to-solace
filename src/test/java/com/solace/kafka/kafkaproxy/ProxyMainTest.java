@@ -1,15 +1,16 @@
-package org.apache.kafka.solace.kafkaproxy;
+package com.solace.kafka.kafkaproxy;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import com.solace.kafka.kafkaproxy.util.ProxyUtils;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Base64;
 
 import org.apache.kafka.common.Uuid;
-import org.apache.kafka.solace.kafkaproxy.util.ProxyUtils;
 
 class ProxyMainTest {
 

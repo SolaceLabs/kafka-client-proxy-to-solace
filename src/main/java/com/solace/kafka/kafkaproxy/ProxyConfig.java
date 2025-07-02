@@ -1,4 +1,4 @@
-package org.apache.kafka.solace.kafkaproxy;
+package com.solace.kafka.kafkaproxy;
 
 /*
  * Copyright 2021 Solace Corporation. All rights reserved.
