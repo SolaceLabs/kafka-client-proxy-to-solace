@@ -113,7 +113,7 @@ import org.apache.kafka.solace.kafkaproxy.consumer.SolaceQueueConsumer.SolaceMes
 import org.apache.kafka.solace.kafkaproxy.util.OpConstants;
 import org.apache.kafka.solace.kafkaproxy.util.ProxyUtils;
 
-import com.solacesystems.common.util.Topic;
+// import com.solacesystems.common.util.Topic;
 import com.solacesystems.jcsmp.JCSMPSession;
 import com.solacesystems.jcsmp.JCSMPStateException;
 import com.solacesystems.jcsmp.SDTMap;
@@ -164,8 +164,8 @@ public class KafkaApiConsumerTools {
     @Getter(AccessLevel.PROTECTED)
     private volatile String subscribedTopicName;
 
-    @Getter(AccessLevel.PROTECTED)
-    private volatile Topic subscribedTopic;
+    // @Getter(AccessLevel.PROTECTED)
+    // private volatile Topic subscribedTopic;
 
     @Getter(AccessLevel.PROTECTED)
     private volatile Uuid subscribedTopicId;
@@ -182,6 +182,8 @@ public class KafkaApiConsumerTools {
     private volatile Long cachedLastDeliveredOffset;
 
     private volatile Integer cachedLastPartitionMaxBytes;
+
+    private volatile Long lastSuccessfulFetchTimestamp;
 
     // Values provided on configuration of the instance
     private final Integer defaultBrokerMaxWaitTimeMs;
@@ -210,13 +212,19 @@ public class KafkaApiConsumerTools {
 
     private static int fetchSessionIdAssigner = 1_000;      // Start new fetch sessionId at 1000
 
+    private static int generationIdAssigner = 1;
+
+    private static synchronized int assignGenerationId() {
+        return generationIdAssigner++;
+    }
+
     private static synchronized int assignFetchSessionId() {
         return fetchSessionIdAssigner++;
     }
 
     /**
      * Call from Metadata connection to assign a new Partition Index if not already assigned
-     * @param topicId
+     * @param topicName
      * @param partitionIndex
      * @return
      */
@@ -308,6 +316,7 @@ public class KafkaApiConsumerTools {
         this.cachedLastDeliveredOffset = -1L;
         this.cachedLastPartitionMaxBytes = 1048576;
         this.firstSessionFetch = true;
+        this.lastSuccessfulFetchTimestamp = Time.SYSTEM.milliseconds();
     }
 
     /**
@@ -333,8 +342,8 @@ public class KafkaApiConsumerTools {
                 log.error("Failed to unsubscribe from queue normally");
                 errorCode = Errors.UNKNOWN_SERVER_ERROR;
             } finally {
-                // consumerToolsInstance.setSolaceQueueConsumer(null);
                 consumerToolsInstance.resetSubscription();
+                consumerToolsInstance.setSolaceQueueConsumer(null);
             }
         } else if (consumerFlowSubscribed(consumerToolsInstance)) {
             // Should not end up here
@@ -422,15 +431,16 @@ public class KafkaApiConsumerTools {
         try {
             if (request instanceof FetchRequest) {
                 final FetchRequest fetchRequest = (FetchRequest)request;
-                topicName = fetchRequest.data().topics().get(0).topic();
+                final FetchRequestData requestData = fetchRequest.data();
+                topicName = requestData.topics().get(0).topic();
                 if (topicName == null || topicName.isEmpty()) {
                     topicId = fetchRequest.data().topics().get(0).topicId();
                 } else {
                     log.trace("Get Uuid from topic name: {}", topicName);
-                    log.trace("The Base64 encoded UUIDv4 that we need for some reason: {}", ProxyUtils.generateMDAsUuidV4AsBase64String(topicName));
+                    log.trace("The Base64 encoded UUIDv4 topic ID: {}", ProxyUtils.generateMDAsUuidV4AsBase64String(topicName));
                     topicId = Uuid.fromString(ProxyUtils.generateMDAsUuidV4AsBase64String(topicName));
                 }
-                partitionIndex = fetchRequest.data().topics().get(0).partitions().get(0).partition();
+                partitionIndex = requestData.topics().get(0).partitions().get(0).partition();
             } else if (request instanceof OffsetsForLeaderEpochRequest) {
                 // TODO: Evaluate if this request should be here - may be best handled as a static request and always assign
                 // consumer group instance on first fetch request
@@ -439,7 +449,7 @@ public class KafkaApiConsumerTools {
                 final OffsetForLeaderTopic offsetForLeaderTopic = offsetsRequest.data().topics().iterator().next();
                 topicName = offsetForLeaderTopic.topic();
                 log.trace("Get Uuid from topic name: {}", topicName);
-                log.trace("The Base64 encoded UUIDv4 that we need for some reason: {}", ProxyUtils.generateMDAsUuidV4AsBase64String(topicName));
+                log.trace("The Base64 encoded UUIDv4 topic ID: {}", ProxyUtils.generateMDAsUuidV4AsBase64String(topicName));
                 topicId = Uuid.fromString(ProxyUtils.generateMDAsUuidV4AsBase64String(topicName));
                 partitionIndex = offsetForLeaderTopic.partitions().get(0).partition();
             } else {
@@ -459,8 +469,9 @@ public class KafkaApiConsumerTools {
              */
             return consumerInstances.get(key).poll();
         } else {
-            log.error("No Consumer Flow to Assign");
-            throw new UnknownServerException(new IllegalStateException("No Consumer Flow to Assign"));
+            log.warn("No Consumer Flow to Assign");
+            // throw new UnknownServerException(new IllegalStateException("No Consumer Flow to Assign"));
+            return null;
         }
     }
 
@@ -650,7 +661,7 @@ public class KafkaApiConsumerTools {
                 }
                 messageTimestamp = messageEntry.getMessage().getReceiveTimestamp();
                 payloadBuffer = messageEntry.getMessage().getAttachmentByteBuffer();
-                // TODO: Skip over records with payload size > max size in config
+                // TODO: Skip over records with payload size > max size in config (implement max message size)
                 messageProperties = messageEntry.getMessage().getProperties();
                 recordKeyBuffer = null;
                 recordHeaders = new RecordHeaders();
@@ -752,6 +763,7 @@ public class KafkaApiConsumerTools {
         } else {
             log.trace("Returning empty FETCH response");
         }
+        lastSuccessfulFetchTimestamp = Time.SYSTEM.milliseconds();
         return new FetchResponse(responseData);
     }
 
@@ -1188,7 +1200,7 @@ public class KafkaApiConsumerTools {
         responseData
             .setThrottleTimeMs(0)
             .setErrorCode(Errors.NONE.code())
-            .setGenerationId(1)             // No re-balancing, so GenerationId always = 1
+            .setGenerationId(assignGenerationId())
             .setProtocolType(protocolType)
             .setProtocolName(protocolName)
             .setLeader(memberId)
@@ -1224,6 +1236,40 @@ public class KafkaApiConsumerTools {
         responseData.setThrottleTimeMs(0);
         responseData.setErrorCode(Errors.NONE.code());
         return new HeartbeatResponse(responseData);
+    }
+
+    public static AbstractResponse createHeartbeatResponseRebalancing()
+    {
+        HeartbeatResponseData responseData = new HeartbeatResponseData();
+        responseData.setThrottleTimeMs(0);
+        responseData.setErrorCode(Errors.REBALANCE_IN_PROGRESS.code());
+        return new HeartbeatResponse(responseData);
+    }
+
+    public static AbstractResponse createOffsetCommitResponseRebalancing(
+        final OffsetCommitRequest request,
+        final RequestHeader requestHeader
+    )
+    {
+        final OffsetCommitRequestData requestData = request.data();
+        final OffsetCommitResponseData responseData = new OffsetCommitResponseData();
+        responseData.setThrottleTimeMs(0);
+        responseData.setTopics(Collections.emptyList());
+        requestData.topics().forEach( topic -> {
+            OffsetCommitResponseData.OffsetCommitResponseTopic responseTopic = 
+                new OffsetCommitResponseData.OffsetCommitResponseTopic()
+                .setName(topic.name());
+            responseTopic.setPartitions(Collections.emptyList());
+            topic.partitions().forEach( partition -> {
+                OffsetCommitResponseData.OffsetCommitResponsePartition responsePartition = 
+                    new OffsetCommitResponseData.OffsetCommitResponsePartition()
+                    .setPartitionIndex(partition.partitionIndex())
+                    .setErrorCode(Errors.UNKNOWN_MEMBER_ID.code());
+                responseTopic.partitions().add(responsePartition);
+            });
+            responseData.topics().add(responseTopic);
+        });
+        return new OffsetCommitResponse(responseData);
     }
 
     /**
@@ -1311,7 +1357,8 @@ public class KafkaApiConsumerTools {
         /**
          * Here is where we subscribe to the queue
          */
-        String queueName = topicName;        // TODO: Derive queue name
+        // TODO: Make Queue name prefix an optional configuration item
+        String queueName = "KAFKA-PROXY-QUEUE/" + topicName + (groupId != null && !groupId.isEmpty() ? ("/" + groupId) : "");        // TODO: Derive queue name
         try {
             log.debug("Subscribing to queue: {}", queueName);
             this.solaceQueueConsumer = SolaceQueueConsumer.createAndStartQueueConsumer(solaceSession, queueName);

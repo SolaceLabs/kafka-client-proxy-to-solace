@@ -744,17 +744,19 @@ public class ProxyChannel {
 				// ApiKey=8
 				// Group Coordinator Channel
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
-                // Ensure kafkaApiConsumerTools is initialized, as OffsetCommit is a group operation
-                if (kafkaApiConsumerTools == null) {
-                    log.error("[Channel {}] KafkaApiConsumerTools is null for OFFSET_COMMIT (CorrId: {}). This indicates a missing JOIN_GROUP/SYNC_GROUP or an internal error.", this.channelId, requestHeader.correlationId());
-                    Send send = requestAndSize.request.getErrorResponse(0, new UnknownServerException("Consumer group not initialized for OffsetCommit."))
-                                    .toSend(requestHeader.toResponseHeader(), version);
-                    dataToSend(send, apiKey);
-                    break;
-                }
 
                 final OffsetCommitRequest offsetCommitRequest = (OffsetCommitRequest) requestAndSize.request;
                 final RequestHeader originalRequestHeader = requestHeader; // Capture for lambda
+
+                if (kafkaApiConsumerTools == null) {
+					// TODO: Test if this condition works as desired
+					// If OffsetCommit is received on this channel and consumerTools is null, then return a response
+					// indicating UNKNOWN_MEMBER_ID - which indicates that the consumer must re-join the group
+					AbstractResponse response = KafkaApiConsumerTools.createOffsetCommitResponseRebalancing(null, requestHeader);
+                    Send send = response.toSend(requestHeader.toResponseHeader(), version);
+					dataToSend(send, apiKey);
+                    break;
+                }
 
                 inFlightRequestCount++;
                 log.trace("[Channel {}] Offloading OFFSET_COMMIT request (CorrId: {}) to executor. In-flight: {}", this.channelId, originalRequestHeader.correlationId(), inFlightRequestCount);
@@ -839,6 +841,15 @@ public class ProxyChannel {
 				// ApiKey=12
 				// GROUP channel
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
+				if (kafkaApiConsumerTools == null) {
+					// TODO: Test if this step works as desired
+					// If a heartbeat request is received and consumerTools is null, then the client will receive a notice
+					// that the Kafka cluster is rebalancing and should then rejoin the consumer group
+					AbstractResponse response = KafkaApiConsumerTools.createHeartbeatResponseRebalancing();
+					Send send = response.toSend(requestHeader.toResponseHeader(), version);
+					dataToSend(send, apiKey);
+					break;
+				}
 				HeartbeatRequest heartbeatRequest = (HeartbeatRequest) requestAndSize.request; // Safe cast after parseRequest
 				AbstractResponse heartbeatResponse = kafkaApiConsumerTools.createHeartbeatResponse(heartbeatRequest, requestHeader);
 				Send send = heartbeatResponse.toSend(requestHeader.toResponseHeader(), version);

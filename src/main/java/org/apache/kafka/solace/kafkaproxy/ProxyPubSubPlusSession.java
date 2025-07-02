@@ -58,6 +58,7 @@ class ProxyPubSubPlusSession {
         } else {
         	topicSeparatorReplace = "";
         }
+        log.debug("Kafka Topic Separators = {}", topicSeparatorReplace);
 		log.info("Creating new session to Solace event broker");
 		session =  JCSMPFactory.onlyInstance().createSession(properties);
 		

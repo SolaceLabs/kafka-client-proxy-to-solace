@@ -36,4 +36,6 @@ public class OpConstants {
 
     public static final long        DEFAULT_MAX_UNCOMMITTED_MESSAGES_PER_FLOW = 2_500L;
 
+    public static final long        DEFAULT_MAX_POLL_INTERVAL_MS = 10_000L;
+
 }
