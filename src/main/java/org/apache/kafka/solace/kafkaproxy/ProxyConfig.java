@@ -35,9 +35,16 @@ public class ProxyConfig  extends AbstractConfig {
     
     public static final String SEPARATOR_CONFIG = "separators";
     public static final String SEPARATOR_DOC = "A list of chars of typical Kafka topic separators that the Proxy will convert to Solace separator '/'";
-
 	
     private static final Pattern SECURITY_PROTOCOL_PATTERN = Pattern.compile("(.*)?://.*");
+
+    public static final String REQUEST_HANDLER_THREADS_CONFIG = "request.handler.threads";
+    public static final int DEFAULT_REQUEST_HANDLER_THREADS = 32;  // Math.max(2, Runtime.getRuntime().availableProcessors() / 2);
+    // TODO: Remember to add this to the ProxyConfig definitions:
+    // .define(REQUEST_HANDLER_THREADS_CONFIG, Type.INT, DEFAULT_REQUEST_HANDLER_THREADS, Importance.LOW, "Number of threads for handling blocking Kafka requests.")
+
+
+    private static Properties kafkaProperties;
     
     /**
      * Extracts the security protocol from a "protocol://host:port" address string.
@@ -49,9 +56,7 @@ public class ProxyConfig  extends AbstractConfig {
         return matcher.matches() ? matcher.group(1) : null;
     }
 
-    
-    
-    
+    public static Properties getKafkaProperties() { return kafkaProperties; }
     
 	// Similar to ClientsUtils::parseAndValidateAddresses but added support for protocol as part of string 
 	// to be of style of "listener" configuration item for broker
@@ -119,15 +124,22 @@ public class ProxyConfig  extends AbstractConfig {
         CONFIG = new ConfigDef().define(LISTENERS_CONFIG, Type.LIST, Collections.emptyList(), new ConfigDef.NonNullValidator(), Importance.HIGH, LISTENERS_DOC)
                                 .define(ADVERTISED_LISTENERS_CONFIG, Type.LIST, Collections.emptyList(), new ConfigDef.NonNullValidator(), Importance.HIGH, ADVERTISED_LISTENERS_DOC) 
                                 .define(SEPARATOR_CONFIG, Type.STRING, "", new ConfigDef.NonNullValidator(), Importance.HIGH, SEPARATOR_DOC) 
-                                .withClientSslSupport();
+                                .define(REQUEST_HANDLER_THREADS_CONFIG, Type.INT, DEFAULT_REQUEST_HANDLER_THREADS, Importance.LOW, "Number of threads for handling blocking Kafka requests.")                                .withClientSslSupport();
     }
     
     public ProxyConfig(Properties props) {
         super(CONFIG, props, false /* do not log values */);
+        kafkaProperties = new Properties();
+        props.forEach( ( k, v ) -> {
+            kafkaProperties.put(k, v);
+        });
     }
 
     public ProxyConfig(Map<String, Object> props) {
         super(CONFIG, props, false /* do not log values */);
+        kafkaProperties = new Properties();
+        props.forEach( ( k, v ) -> {
+            kafkaProperties.put(k, v);
+        });
     }
-
 }

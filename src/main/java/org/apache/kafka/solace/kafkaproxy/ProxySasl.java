@@ -76,15 +76,6 @@ public class ProxySasl {
         }    
     }
     
-    private static void bytesToHex(byte[] buf, int start, int length) {
-        for (int i = start; i < start + length; i++) {
-            String st = String.format("%02X ", buf[i]);
-            System.out.print(st);
-        }
-        System.out.print('\n');
-    }
-
-
     // Some code taken from org.apache.kafka.common.security.plain.internals.PlainSaslServer.java
     public ProxyPubSubPlusSession authenticate(
                ProxyChannel.AuthorizationResult authResult, byte[] responseBytes) 

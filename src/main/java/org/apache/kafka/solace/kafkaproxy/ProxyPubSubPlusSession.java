@@ -15,6 +15,7 @@ import com.solacesystems.jcsmp.JCSMPSession;
 import com.solacesystems.jcsmp.JCSMPStreamingPublishCorrelatingEventHandler;
 import com.solacesystems.jcsmp.Topic;
 import com.solacesystems.jcsmp.XMLMessage.MessageUserPropertyConstants;
+
 import com.solacesystems.jcsmp.XMLMessageProducer;
 import com.solacesystems.jcsmp.BytesMessage;
 import com.solacesystems.jcsmp.SDTMap;
@@ -57,6 +58,7 @@ class ProxyPubSubPlusSession {
         } else {
         	topicSeparatorReplace = "";
         }
+        log.debug("Kafka Topic Separators = {}", topicSeparatorReplace);
 		log.info("Creating new session to Solace event broker");
 		session =  JCSMPFactory.onlyInstance().createSession(properties);
 		
@@ -84,6 +86,10 @@ class ProxyPubSubPlusSession {
         }
     }
 
+    public JCSMPSession getJcsmpSession() {
+        return session;
+    }
+
     public void removeChannel(ProxyChannel channel) {
         synchronized (channels) {
             channels.remove(channel);
@@ -99,13 +105,13 @@ class ProxyPubSubPlusSession {
     // Used to fail all channels that use this API session when we need to fail
     // and we do not have a reference to the particular proxy channel that has
     // an issue. Should never happen.
-    private void failAllChannels() {
-        synchronized (channels) {
-            for (ProxyChannel channel : channels) {
-                new ProxyChannel.Close(channel, "Session to Solace broker going down").addToWorkQueue();
-            }
-        }
-    }
+    // private void failAllChannels() {
+    //     synchronized (channels) {
+    //         for (ProxyChannel channel : channels) {
+    //             new ProxyChannel.Close(channel, "Session to Solace broker going down").addToWorkQueue();
+    //         }
+    //     }
+    // }
     
     public void connect(ProxyChannel.AuthorizationResult authResult) {
         ProxyPubSubPlusClient.getExecutorService().execute(new Runnable() {

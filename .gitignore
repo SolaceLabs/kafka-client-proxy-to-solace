@@ -32,3 +32,13 @@ libs/
 .idea
 log/
 bin/
+
+# OS Files
+.DS_Store
+
+# IDEs
+.vscode/
+
+# Test configs
+# May contain secrets
+src/test/resources/configs
