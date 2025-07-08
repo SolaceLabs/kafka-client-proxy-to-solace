@@ -20,9 +20,9 @@ import org.slf4j.LoggerFactory;
 
 
 public class ProxyMain {
-    
-    private static final String KAFKA_PROPERTY_PREFIX = "kafka.proxy.";
-    private static final String SOLACE_PROPERTY_PREFIX = "solace.proxy.";
+
+    // Solace JCSMP Properties and SSL config for Proxy->Broker connection
+    private static final String SOLACE_PROPERTY_PREFIX = "solace.";
 
     private static final Logger log = LoggerFactory.getLogger(ProxyMain.class);
     private final String clusterId;
@@ -57,8 +57,8 @@ public class ProxyMain {
             final String propName = (String) key;
             if (propName.startsWith(SOLACE_PROPERTY_PREFIX)) {
                 solaceProperties.put(propName.substring(SOLACE_PROPERTY_PREFIX.length()), props.getProperty(propName));
-            } else if (propName.startsWith(KAFKA_PROPERTY_PREFIX)) {
-                kafkaProperties.put(propName.substring(KAFKA_PROPERTY_PREFIX.length()), props.getProperty(propName));
+            } else {
+                kafkaProperties.put(propName, props.getProperty(propName));
             }
         }
         

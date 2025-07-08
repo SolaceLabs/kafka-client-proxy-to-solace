@@ -14,9 +14,26 @@ java -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 -jar target/
 
 
 
+java \
+  --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+  --add-opens java.base/java.nio=ALL-UNNAMED \
+  --add-opens java.base/java.lang=ALL-UNNAMED \
+  --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
+  --add-opens java.base/java.util=ALL-UNNAMED \
+  --add-opens java.base/java.util.concurrent=ALL-UNNAMED \
+  -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 \
+  -jar target/kafka-wireline-proxy-1.2.jar test-data/configs/demo-proxy.properties
+
+
 ```
 
 ## Run Producer
+
+
+```bash
+java -cp demo-producer/target/kafka-demo-producer-3.9.1.jar com.solace.kafka.wireline.kafkaproxy.demo.LargeFileGenerator getting-started/test-data/publish-long-record.txt
+```
+
 
 ```bash
 

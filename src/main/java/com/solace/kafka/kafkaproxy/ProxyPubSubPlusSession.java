@@ -53,11 +53,13 @@ class ProxyPubSubPlusSession {
 		properties.setProperty(JCSMPProperties.USERNAME, new String(username, "UTF-8"));
 		properties.setProperty(JCSMPProperties.PASSWORD, new String(password, "UTF-8"));
         properties.setProperty(JCSMPProperties.PUB_ACK_WINDOW_SIZE, 255);
-        if (baseServiceProps.containsKey(ProxyConfig.SEPARATOR_CONFIG)) {
-        	topicSeparatorReplace = '[' + baseServiceProps.getProperty(ProxyConfig.SEPARATOR_CONFIG) + ']';
-        } else {
-        	topicSeparatorReplace = "";
-        }
+        String topicSeparators = ProxyConfig.getInstance().getString(ProxyConfig.SEPARATOR_CONFIG);
+        topicSeparatorReplace = topicSeparators.isEmpty() ? "" : "[" + topicSeparators + "]";
+        // if (baseServiceProps.containsKey(ProxyConfig.SEPARATOR_CONFIG)) {
+        // 	topicSeparatorReplace = '[' + baseServiceProps.getProperty(ProxyConfig.SEPARATOR_CONFIG) + ']';
+        // } else {
+        // 	topicSeparatorReplace = "";
+        // }
         log.debug("Kafka Topic Separators = {}", topicSeparatorReplace);
 		log.info("Creating new session to Solace event broker");
 		session =  JCSMPFactory.onlyInstance().createSession(properties);
@@ -162,5 +164,5 @@ class ProxyPubSubPlusSession {
         session.closeSession();
         publisher.close();
     }
-        
+
 }

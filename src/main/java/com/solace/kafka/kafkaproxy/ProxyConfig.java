@@ -33,18 +33,50 @@ public class ProxyConfig  extends AbstractConfig {
     public static final String ADVERTISED_LISTENERS_CONFIG = "advertised.listeners";
     public static final String ADVERTISED_LISTENERS_DOC = "An optional list of host:[port] tuples to reflect what external clients can connect to.";	
     
-    public static final String SEPARATOR_CONFIG = "separators";
-    public static final String SEPARATOR_DOC = "A list of chars of typical Kafka topic separators that the Proxy will convert to Solace separator '/'";
-	
+    // TODO: Implement respect for this value
+    public static final String PRODUCE_MESSAGE_MAX_BYTES = "message.max.bytes";
+    public static final String PRODUCE_MESSAGE_MAX_BYTES_DOC = "Maximum allowed record size (bytes) that can be produced to a topic";
+    public static final int DEFAULT_PRODUCE_MESSAGE_MAX_BYTES = 1_048_576;
+
     private static final Pattern SECURITY_PROTOCOL_PATTERN = Pattern.compile("(.*)?://.*");
 
-    public static final String REQUEST_HANDLER_THREADS_CONFIG = "request.handler.threads";
-    public static final int DEFAULT_REQUEST_HANDLER_THREADS = 32;  // Math.max(2, Runtime.getRuntime().availableProcessors() / 2);
-    // TODO: Remember to add this to the ProxyConfig definitions:
-    // .define(REQUEST_HANDLER_THREADS_CONFIG, Type.INT, DEFAULT_REQUEST_HANDLER_THREADS, Importance.LOW, "Number of threads for handling blocking Kafka requests.")
+    private static final String PROXY_PROPERTY_PREFIX = "proxy.";
 
+    public static final String SEPARATOR_CONFIG = PROXY_PROPERTY_PREFIX + "separators";
+    public static final String SEPARATOR_DOC = "A list of chars of typical Kafka topic separators that the Proxy will convert to Solace separator '/'";
+	
+    public static final String REQUEST_HANDLER_THREADS_CONFIG = PROXY_PROPERTY_PREFIX + "request.handler.threads";
+    public static final String REQUEST_HANDLER_THREADS_DOC = "Number of threads for handling blocking Kafka requests.";
+    // TODO: Eval if this should be dynamic setting suggested
+    public static final int DEFAULT_REQUEST_HANDLER_THREADS = 32;  // Math.max(2, Runtime.getRuntime().availableProcessors() / 2);
+
+    public static final String PARTITIONS_PER_TOPIC = PROXY_PROPERTY_PREFIX + "partitions.per.topic";
+    public static final String PARTITIONS_PER_TOPIC_DOC = "Number of virtual partitions per topic.";
+    public static final int DEFAULT_PARTITIONS_PER_TOPIC = 100;
+
+    public static final String QUEUENAME_QUALIFIER = PROXY_PROPERTY_PREFIX + "queuename.qualifier";
+    public static final String QUEUENAME_QUALIFIER_DOC = "Qualifier expected on consumer subscribed queues. e.g.: Queue name Qualifier = 'kafka-proxy' --> Expected queue name = 'kafka-proxy/QUEUE_NAME[/Group Name]";
+
+    public static final String QUEUENAME_IS_TOPICNAME = PROXY_PROPERTY_PREFIX + "queuename.is.topicname";
+    public static final String QUEUENAME_IS_TOPICNAME_DOC = "true/false -- If true, then expected Solace Queue Name is the Kafka consumer subscribed topic name as given. Do not consider queue qualifier or consumer group ID.";
+
+    public static final String FETCH_COMPRESSION_TYPE = PROXY_PROPERTY_PREFIX + "fetch.compression.type";
+    public static final String FETCH_COMPRESSION_TYPE_DOC = "Type of compression to use when fetching records from Kafka proxy. Valid values are `none`, `gzip`, `snappy`, `lz4`, and `zstd`. Applies to all Kafka topics and consumers for the proxy instance.";
+    public static final String DEFAULT_FETCH_COMPRESSION_TYPE = "none";
+
+    public static final String MAX_UNCOMMITTED_MESSAGES_PER_FLOW = PROXY_PROPERTY_PREFIX + "max.uncommitted.messages";
+    public static final String MAX_UNCOMMITTED_MESSAGES_PER_FLOW_DOC = "Maximum number of uncommitted messages read from a queue before Fetch requests halt.";
+    public static final long DEFAULT_MAX_UNCOMMITTED_MESSAGES_PER_FLOW = 1_000L;
 
     private static Properties kafkaProperties;
+
+    private static Properties proxyProperties;
+
+    private static ProxyConfig proxyConfig;
+
+    public static ProxyConfig getInstance() {
+        return proxyConfig;
+    }
     
     /**
      * Extracts the security protocol from a "protocol://host:port" address string.
@@ -57,6 +89,8 @@ public class ProxyConfig  extends AbstractConfig {
     }
 
     public static Properties getKafkaProperties() { return kafkaProperties; }
+
+    public static Properties getProxyProperties() { return proxyProperties; }
     
 	// Similar to ClientsUtils::parseAndValidateAddresses but added support for protocol as part of string 
 	// to be of style of "listener" configuration item for broker
@@ -123,23 +157,46 @@ public class ProxyConfig  extends AbstractConfig {
     static {
         CONFIG = new ConfigDef().define(LISTENERS_CONFIG, Type.LIST, Collections.emptyList(), new ConfigDef.NonNullValidator(), Importance.HIGH, LISTENERS_DOC)
                                 .define(ADVERTISED_LISTENERS_CONFIG, Type.LIST, Collections.emptyList(), new ConfigDef.NonNullValidator(), Importance.HIGH, ADVERTISED_LISTENERS_DOC) 
+                                .define(PRODUCE_MESSAGE_MAX_BYTES, Type.INT, DEFAULT_PRODUCE_MESSAGE_MAX_BYTES, new ConfigDef.NonNullValidator(), Importance.MEDIUM, PRODUCE_MESSAGE_MAX_BYTES_DOC)
+                                .withClientSslSupport()
                                 .define(SEPARATOR_CONFIG, Type.STRING, "", new ConfigDef.NonNullValidator(), Importance.HIGH, SEPARATOR_DOC) 
-                                .define(REQUEST_HANDLER_THREADS_CONFIG, Type.INT, DEFAULT_REQUEST_HANDLER_THREADS, Importance.LOW, "Number of threads for handling blocking Kafka requests.")                                .withClientSslSupport();
+                                .define(REQUEST_HANDLER_THREADS_CONFIG, Type.INT, DEFAULT_REQUEST_HANDLER_THREADS, new ConfigDef.NonNullValidator(), Importance.HIGH, REQUEST_HANDLER_THREADS_DOC)
+                                .define(PARTITIONS_PER_TOPIC, Type.INT, DEFAULT_PARTITIONS_PER_TOPIC, new ConfigDef.NonNullValidator(), Importance.HIGH, PARTITIONS_PER_TOPIC_DOC)
+                                .define(MAX_UNCOMMITTED_MESSAGES_PER_FLOW, Type.LONG, DEFAULT_MAX_UNCOMMITTED_MESSAGES_PER_FLOW, new ConfigDef.NonNullValidator(), Importance.MEDIUM, MAX_UNCOMMITTED_MESSAGES_PER_FLOW_DOC)
+                                .define(QUEUENAME_QUALIFIER, Type.STRING, "", new ConfigDef.NonNullValidator(), Importance.HIGH, QUEUENAME_QUALIFIER_DOC)
+                                .define(QUEUENAME_IS_TOPICNAME, Type.BOOLEAN, false, Importance.LOW, QUEUENAME_IS_TOPICNAME_DOC)
+                                .define(FETCH_COMPRESSION_TYPE, Type.STRING, DEFAULT_FETCH_COMPRESSION_TYPE, new ConfigDef.NonNullValidator(), Importance.LOW, FETCH_COMPRESSION_TYPE_DOC);
     }
     
+    // TODO: Validate properties to ensure that values are valid before starting the proxy
+
     public ProxyConfig(Properties props) {
         super(CONFIG, props, false /* do not log values */);
         kafkaProperties = new Properties();
+        proxyProperties = new Properties();
         props.forEach( ( k, v ) -> {
-            kafkaProperties.put(k, v);
+            final String propName = (String) k;
+            if (propName.startsWith(PROXY_PROPERTY_PREFIX)) {
+                proxyProperties.put(propName, v);
+            } else {
+                kafkaProperties.put(k, v);
+            }
         });
+        proxyConfig = this;
     }
 
     public ProxyConfig(Map<String, Object> props) {
         super(CONFIG, props, false /* do not log values */);
         kafkaProperties = new Properties();
+        proxyProperties = new Properties();
         props.forEach( ( k, v ) -> {
-            kafkaProperties.put(k, v);
+            final String propName = (String) k;
+            if (propName.startsWith(PROXY_PROPERTY_PREFIX)) {
+                proxyProperties.put(propName, v);
+            } else {
+                kafkaProperties.put(k, v);
+            }
         });
+        proxyConfig = this;
     }
 }
