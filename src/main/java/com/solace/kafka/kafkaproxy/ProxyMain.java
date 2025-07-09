@@ -56,10 +56,11 @@ public class ProxyMain {
         for (Object key : props.keySet()) {
             final String propName = (String) key;
             if (propName.startsWith(SOLACE_PROPERTY_PREFIX)) {
-                solaceProperties.put(propName.substring(SOLACE_PROPERTY_PREFIX.length()), props.getProperty(propName));
+                solaceProperties.put(propName.substring(SOLACE_PROPERTY_PREFIX.length()), ProxyConfig.resolvePropertyValueFromEnv(props.getProperty(propName)));
             } else {
-                kafkaProperties.put(propName, props.getProperty(propName));
+                kafkaProperties.put(propName, ProxyConfig.resolvePropertyValueFromEnv(props.getProperty(propName)));
             }
+            log.info("Property: " + propName + " = " + ProxyConfig.resolvePropertyValueFromEnv(props.getProperty(propName)));
         }
         
         ProxyPubSubPlusClient.getInstance().configure(solaceProperties);

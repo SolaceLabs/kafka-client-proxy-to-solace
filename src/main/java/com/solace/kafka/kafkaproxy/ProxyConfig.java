@@ -68,6 +68,10 @@ public class ProxyConfig  extends AbstractConfig {
     public static final String MAX_UNCOMMITTED_MESSAGES_PER_FLOW_DOC = "Maximum number of uncommitted messages read from a queue before Fetch requests halt.";
     public static final long DEFAULT_MAX_UNCOMMITTED_MESSAGES_PER_FLOW = 1_000L;
 
+    private static final String PROPERTY_VALUE_PATTERN = "^\\$\\{(env:){0,1}(?<variableName>[A-Za-z0-9_]+)(:(?<defaultValue>.*)){0,1}\\}$";
+    private static final Pattern PATTERN = Pattern.compile(PROPERTY_VALUE_PATTERN);
+    private static final String VARIABLE_NAME = "variableName", DEFAULT_VALUE = "defaultValue";
+
     private static Properties kafkaProperties;
 
     private static Properties proxyProperties;
@@ -78,6 +82,26 @@ public class ProxyConfig  extends AbstractConfig {
         return proxyConfig;
     }
     
+    public static String resolvePropertyValueFromEnv(final String propertyValue) {
+        if (propertyValue == null || propertyValue.isEmpty()) {
+            return "";
+        }
+        final Matcher matcher = PATTERN.matcher(propertyValue);
+        if (matcher.matches()) {
+            // String prefix = matcher.group(PREFIX);
+            String variableName = matcher.group(VARIABLE_NAME);
+            String defaultValue = matcher.group(DEFAULT_VALUE);
+            // String variableName = matcher.group(2);
+            // String defaultValue = matcher.group(3);
+            defaultValue = defaultValue == null ? "" : defaultValue;
+
+            String resolvedValue = System.getenv(variableName);
+            return resolvedValue != null ? resolvedValue : defaultValue;
+        } else {
+            return propertyValue;
+        }
+    }
+
     /**
      * Extracts the security protocol from a "protocol://host:port" address string.
      * @param address address string to parse

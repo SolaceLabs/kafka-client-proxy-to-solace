@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kproxy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-wireline-proxy
+  namespace: kproxy
+spec:
+  replicas: 2  # Set desired number of pods here
+  selector:
+    matchLabels:
+      app: kafka-wireline-proxy
+  template:
+    metadata:
+      labels:
+        app: kafka-wireline-proxy
+    spec:
+      containers:
+        - name: kafka-wireline-proxy
+          # Replace with your actual image name and tag
+          image: kafka-proxy:1.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9092
+            - containerPort: 9094
+          env:
+          # Uncomment and set the following environment variables as needed
+            - name: JAVA_OPTS
+              value: "-Xms512m -Xmx1536m -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094"
+            - name: KAFKA_KEYSTORE_LOCATION
+              value: "keystore"
+            - name: KAFKA_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-keystore-password
+                  key: KAFKA_KEYSTORE_PASSWORD
+            - name: KAFKA_KEYSTORE_TYPE
+              value: "PKCS12"
+            - name: SOLACE_HOST
+              value: "tcps://localhost:55443"
+          resources:
+            limits:
+              memory: "1Gi"
+              cpu: "750m"
+            requests:
+              memory: "1Gi"
+              cpu: "750m"
+          volumeMounts:
+            - name: kafka-keystore-volume
+              mountPath: /app/keystore
+              subPath: keystore
+              readOnly: true
+            # - name: kafka-truststore-volume-mount
+            #   mountPath: /app/truststore
+            #   subPath: truststore
+            #   readOnly: true
+            - name: proxy-config-volume
+              mountPath: /app/proxy.properties
+              subPath: proxy.properties
+              readOnly: true
+      volumes:
+        - name: kafka-keystore-volume
+          secret:
+            secretName: kafka-keystore
+        # - name: kafka-truststore-volume
+        #   secret:
+        #     secretName: kafka-proxy-truststore
+        - name: proxy-config-volume
+          configMap:
+            name: kafka-proxy-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-wireline-proxy-lb
+  namespace: kproxy
+spec:
+  type: LoadBalancer
+  selector:
+    app: kafka-wireline-proxy
+  ports:
+    - name: kafka-plaintext-port
+      port: 9092
+      targetPort: 9092
+    - name: kafka-ssl-port
+      port: 9094
+      targetPort: 9094

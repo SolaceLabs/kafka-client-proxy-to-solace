@@ -1,6 +1,29 @@
 # Running Producer Demo from command line
 
+## Run proxy image
 
+```bash
+
+podman run \
+  -v /path/to/keystore.pkcs12:/app/keystore.pkcs12:ro \
+  -v /path/to/truststore.jks:/app/truststore.jks:ro \
+  -v /path/to/config.properties:/app/proxy.properties \
+  -e JAVA_OPTS="-XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 -Xms512m -Xmx1536m" \
+  kafka-proxy:1.2
+
+
+
+podman run -d --name kafka-proxy \
+  -v /Users/dennisbrinley/Development/Projects/kafka-wireline/certs/keystore.pkcs12:/app/keystore.pkcs12:ro \
+  -v /Users/dennisbrinley/Development/Projects/kafka-wireline/certs/trusted.jks:/app/truststore.jks:ro \
+  -v /Users/dennisbrinley/Development/Projects/kafka-wireline/kafka-client-proxy-to-solace/getting-started/configs/container-proxy.properties:/app/proxy.properties \
+  -e JAVA_OPTS="-XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 -Xms512m -Xmx1g" \
+  -p 9092:9092 -p 9094:9094 \
+  kafka-proxy:1.2
+
+
+
+```
 
 ## Run Proxy
 

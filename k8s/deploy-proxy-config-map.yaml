@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-proxy-config
+  namespace: kproxy
+data:
+  proxy.properties: |
+    ## KAFKA-SPECIFIC SETTINGS
+    ##########################
+
+    listeners: ${env:KAFKA_LISTENERS:PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094}
+    #listeners: PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094
+    #listeners: PLAINTEXT://10.1.2.3:9092
+
+    # advertised.listeners (OPTIONAL):
+    # For cloud providers, this is usually the public IP address
+    # This is often required if running in a container as well
+    # Number of entries must = number of listeners
+    #advertised.listeners: PLAINTEXT://172.1.2.3:9092,SASL_SSL://172.1.2.3:9094
+    #advertised.listeners: PLAINTEXT://public.host.domain:9092,SASL_SSL://public.host.domain:9094
+
+    ssl.keystore.location: ${env:KAFKA_KEYSTORE_LOCATION:keystore}
+    ssl.keystore.password: ${env:KAFKA_KEYSTORE_PASSWORD:password}
+    ssl.keystore.type: ${env:KAFKA_KEYSTORE_TYPE:PKCS12}
+    ssl.enabled.protocols: TLSv1.2
+
+    # ssl.truststore.location: path/to/truststore/trusted.jks
+    # ssl.truststore.password: trusted
+    # ssl.truststore.type: JKS
+    # ssl.endpoint.identification.algorithm: 
+
+    # solace.host:     ${env:SOLACE_HOST:tcps://localhost:55443}
+    # solace.vpn_name: ${env:SOLACE_VPN_NAME:default}
+    solace.host:     ${env:SOLACE_HOST:tcps://localhost:55443}
+    solace.vpn_name: ${env:SOLACE_VPN_NAME:default}
+    solace.ssl.enabled.protocols: TLSv1.2
+
+    # solace.ssl.truststore.location: path/to/truststore/trusted.jks
+    # solace.ssl.truststore.password: trusted
+    # solace.ssl.truststore.type: JKS
+    # solace.ssl.endpoint.identification.algorithm: 
+
+    ## PRODUCER SETTINGS
+    proxy.separators: _.
+    message.max.bytes: 1048576
+    ## CONSUMER SETTINGS
+    proxy.request.handler.threads: 32
+    proxy.partitions.per.topic: 50
+    proxy.queuename.qualifier: KAFKA-PROXY
+    proxy.queuename.is.topicname: false
+    proxy.fetch.compression.type: none
+    proxy.max.uncommitted.messages: 1000
