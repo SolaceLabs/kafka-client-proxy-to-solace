@@ -28,6 +28,8 @@ For consumers, the proxy manages consumer groups and topic subscriptions, mappin
 
 ### Building
 
+#### Using Maven
+
 Use Maven to build and package the application:
 
 ```bash
@@ -42,7 +44,31 @@ mvn clean package
 target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar
 ```
 
+#### Using Gradle
+
+Alternatively, use Gradle to build and package the application:
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd kafka-client-proxy-to-solace
+
+# Build the project and its dependencies
+./gradlew clean build
+
+# The built JAR will be available at:
+build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar
+
+# Display project information
+./gradlew info
+
+# Show dependency tree for debugging
+./gradlew dependencies
+```
+
 ### Running as JAR
+
+#### Using Maven-built JAR
 
 ```bash
 # Run the proxy with a properties file
@@ -57,6 +83,40 @@ java -Xms512m -Xmx2g -XX:+UseG1GC \
 java -Dlogback.configurationFile=logback.xml \
      -jar target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar \
      /path/to/proxy.properties
+```
+
+#### Using Gradle-built JAR
+
+```bash
+# Run the proxy with a properties file
+java -jar build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar /path/to/proxy.properties
+
+# Run directly with Gradle (development mode)
+./gradlew run-proxy --args="sample-configs/proxy-example.properties"
+
+# Example with JVM tuning options
+java -Xms512m -Xmx2g -XX:+UseG1GC \
+     -jar build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar \
+     /path/to/proxy.properties
+
+# With custom logging configuration
+java -Dlogback.configurationFile=logback.xml \
+     -jar build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar \
+     /path/to/proxy.properties
+```
+
+#### Running Demo Clients with Gradle
+
+```bash
+# Run demo producer
+./gradlew run-demo-producer --args="sample-configs/demo-producer.properties test-topic 10"
+
+# Run demo consumer
+./gradlew run-demo-consumer --args="sample-configs/demo-consumer.properties test-topic test-group"
+
+# Run multiple instances for testing
+./gradlew run-demo-consumer --args="sample-configs/demo-consumer.properties test-topic group-a" &
+./gradlew run-demo-consumer --args="sample-configs/demo-consumer.properties test-topic group-b" &
 ```
 
 ### Docker Container
@@ -146,9 +206,21 @@ The Kafka Proxy takes one command line argument: a properties file to configure 
 | `ssl.keystore.location` | Path to the keystore file containing the server's SSL certificate (PKCS12 or JKS format) | | ✅ (for SSL) |
 | `ssl.keystore.password` | Password for the keystore file. Supports environment variable resolution: `${env:KAFKA_KEYSTORE_PASSWORD}` | | ✅ (for SSL) |
 | `ssl.keystore.type` | Format of the keystore file. Valid values: `JKS`, `PKCS12` | `JKS` | |
-| `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. Example: `TLSv1.2,TLSv1.3` | `TLSv1.2` | |
+| `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. **Note: Use TLSv1.2 for compatibility with Solace PubSub+ brokers.** Example: `TLSv1.2` or `TLSv1.2,TLSv1.1` | `TLSv1.2` | |
 | `ssl.cipher.suites` | Comma-separated list of SSL cipher suites to enable | JVM defaults | |
 | `ssl.protocol` | SSL protocol to use. Valid values: `TLS`, `TLSv1.1`, `TLSv1.2`, `TLSv1.3` | `TLS` | |
+
+**Recommended SSL Configuration:**
+```properties
+# Recommended for compatibility with Solace PubSub+ brokers
+ssl.enabled.protocols=TLSv1.2
+
+# For broader client compatibility (if needed)
+ssl.enabled.protocols=TLSv1.2,TLSv1.1
+
+# Modern configuration (may have compatibility limitations)
+ssl.enabled.protocols=TLSv1.3,TLSv1.2
+```
 
 #### mTLS (Mutual TLS) Configuration
 
@@ -326,7 +398,7 @@ proxy.healthcheckserver.port=8080
 
 ## Testing
 
-For testing the proxy with sample Kafka clients, see: **[Sample Kafka Client Demo](getting-started/SampleKafkaClient.md)**
+For testing the proxy with sample Kafka clients, see: **[Sample Kafka Client Demo](sample-configs/SampleKafkaClient.md)**
 
 The demo includes embedded Java producer and consumer clients with configuration examples for both plaintext and SSL connections.
 
