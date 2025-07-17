@@ -682,6 +682,17 @@ public class ProxyChannel {
 						dataToSend(send, apiKey);
 						break;
 					}
+
+					if (kafkaApiConsumerTools == null) {
+						log.error("[Channel {}] KafkaApiConsumerTools is null for FETCH request -- likely consumer reconnecting", this.channelId);
+						log.debug("On consumer reconnect, we will tell the consumer that the session is bad to force group rejoin");
+						// Send a bad session response to the consumer
+						final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
+						AbstractResponse fetchResponseInvalidSession = KafkaApiConsumerTools.createFetchResponseInvalidSessionId(fetchRequest, requestHeader);
+						Send send = fetchResponseInvalidSession.toSend(requestHeader.toResponseHeader(), version);
+						dataToSend(send, apiKey);
+						break;
+					}
 				}
 
 				final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
@@ -793,12 +804,6 @@ public class ProxyChannel {
                 Send send = metadataResponse.toSend(requestHeader.toResponseHeader(), version);
                 dataToSend(send, apiKey);
 
-				// Metadata Channel -- Static channel does not require Solace Broker I/O
-				if (!sessionClosed) {
-					this.session.close();
-					sessionClosed = true;
-				}
-
 				break; // Added break statement
             }
             case OFFSET_COMMIT: {
@@ -862,6 +867,14 @@ public class ProxyChannel {
 						KafkaApiConsumerTools.createFindCoordinatorResponse(findCoordinatorRequest, requestHeader, listenPort);
 				Send send = findCoordinatorResponse.toSend(requestHeader.toResponseHeader(), version);
 				dataToSend(send, apiKey);
+
+				// Metadata Channel -- Static channel does not require Solace Broker I/O
+				// Producers may publish to the same metadata/data plane channel so only close the session
+				// if we know it is a consumer channel
+				if (consumerMetadataChannel &&!sessionClosed) {
+					this.session.close();
+					sessionClosed = true;
+				}
 
                 break;
             }

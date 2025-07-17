@@ -1,253 +1,433 @@
-
 # Kafka Proxy for Solace PubSub+
 
-A proxy that allows Kafka clients to publish and subscribe to a Solace PubSub+ event broker without changes to the Kafka client application.
+A high-performance proxy that allows Kafka clients to publish and subscribe to a Solace PubSub+ event broker without any changes to the Kafka client application.
 
 ## Description
 
-This project allows a Kafka client application to produce and consume messages from the Solace PubSub+ event mesh via the proxy. The proxy speaks the Kafka wireline protocol to the Kafka client application and the Solace SMF protocol to the Solace PubSub+ Event Broker.
+This project enables Kafka client applications to seamlessly produce and consume messages from the Solace PubSub+ event mesh via the proxy. The proxy speaks the native Kafka wireline protocol to Kafka client applications and the Solace SMF protocol to the Solace PubSub+ Event Broker.
 
-For producers, the Kafka topic can be published to the Solace PubSub+ Event Mesh unmodified, or converted to a hierarchical Solace topic by splitting on a specified list of characters.
+**Key Features:**
+- **Protocol Translation**: Transparent conversion between Kafka wireline protocol and Solace SMF
+- **Producer Support**: Kafka topics can be published unmodified or converted to hierarchical Solace topics
+- **Consumer Support**: Full consumer group management with mapping to Solace queues and topic subscriptions
+- **Security**: Comprehensive SSL/TLS and mTLS support for both Kafka clients and Solace connections
+- **Kubernetes Ready**: Production-ready deployment configurations for AWS EKS
 
-For consumers, the proxy manages consumer groups and topic subscriptions, mapping them to Solace queues and topic subscriptions.
+For producers, Kafka topics can be published to the Solace PubSub+ Event Mesh unmodified, or converted to hierarchical Solace topics by splitting on specified characters.
+
+For consumers, the proxy manages consumer groups and topic subscriptions, mapping them to Solace queues and topic subscriptions with configurable queue naming strategies.
 
 ## Getting Started
 
 ### Dependencies
 
-*   `kafka-clients`
-*   `sol-jcsmp`
-*   `slf4j-api` and an SLF4J binding of your choice (see http://www.slf4j.org/manual.html)
+- **Java 17+** - Required runtime
+- **kafka-clients** - Kafka protocol implementation
+- **sol-jcsmp** - Solace messaging API
+- **slf4j-api** - Logging framework
 
 ### Building
 
-Use Maven to build and run the application:
+Use Maven to build and package the application:
 
 ```bash
-# Build the project and its dependencies
-mvn clean install
+# Clone the repository
+git clone <repository-url>
+cd kafka-client-proxy-to-solace
 
-# Run the proxy with an example properties file
-java -cp target/kafka-wireline-proxy-1.2-jar-with-dependencies.jar com.solace.kafka.kafkaproxy.ProxyMain proxy-example.properties
+# Build the project and its dependencies
+mvn clean package
+
+# The built JAR will be available at:
+target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar
 ```
 
+### Running as JAR
 
+```bash
+# Run the proxy with a properties file
+java -jar target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar /path/to/proxy.properties
 
+# Example with JVM tuning options
+java -Xms512m -Xmx2g -XX:+UseG1GC \
+     -jar target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar \
+     /path/to/proxy.properties
 
+# With custom logging configuration
+java -Dlogback.configurationFile=logback.xml \
+     -jar target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar \
+     /path/to/proxy.properties
+```
 
+### Docker Container
 
-# Configuration
+#### Using Pre-built Image
 
-The Kafka Wireline proxy for Solace takes one command line argument: a properties file to configure the proxy.
+A pre-built Docker image is available from the Solace Labs container registry:
 
-- Kafka Client Listener
-    - SSL/TLS for Kafka Listener
-    - mTLS for Kafka Listener
-- Solace Broker Connection Settings
-    - SSL/TLS for Solace Broker Connection
-    - mTLS for Solace Broker Connection
-- 
+```bash
+# Pull the latest image
+docker pull ghcr.io/solacelabs/kafka-wireline-proxy:latest
 
-## Kafka Client Listener
+# Run container with pre-built image
+docker run -d \
+  --name kafka-proxy \
+  -p 9092:9092 \
+  -p 9094:9094 \
+  -p 8080:8080 \
+  -v /path/to/proxy.properties:/app/proxy.properties \
+  -v /path/to/certs:/app/certs \
+  ghcr.io/solacelabs/kafka-wireline-proxy:latest
+```
 
-| Property | Description | Default |
-| :--- | :--- | :---: |
-| `listeners` | **REQUIRED** A comma-separated list of `[protocol://]host:[port]` tuples for the proxy to listen on for Kafka client connections. Example: `PLAINTEXT://localhost:9092,SASL_SSL://localhost:9094` |  |
-| `advertised.listeners` | An optional comma-separated list of `host:port` tuples to advertise to clients. This is useful when the proxy is running in a container or behind a NAT. The number of entries must match the number of entries in `listeners`. |  |
+#### Building Custom Image
 
-### Kafka Listener Security (SSL/TLS)
+```bash
+# Build Docker image locally
+docker build -t kafka-proxy:latest .
 
-| Property | Description | Default |
-| :--- | :--- | :---: |
-| `ssl.keystore.location` | The path to the keystore file for the server's SSL certificate. | |
-| `ssl.keystore.password` | The password for the keystore file. | |
-| `ssl.enabled.protocols` | A comma-separated list of the TLS protocols to enable. Example: `TLSv1.2` | |
+# Run container with custom image
+docker run -d \
+  -p 9092:9092 \
+  -p 9094:9094 \
+  -v /path/to/proxy.properties:/app/proxy.properties \
+  -v /path/to/certs:/app/certs \
+  kafka-proxy:latest
+```
 
-> **Note:** The proxy supports other standard SSL configuration properties.
+## Kubernetes Deployment
 
-### Kafka Listener mTLS / Client Certificate verification
+The Kafka Proxy is designed for production deployment on Kubernetes with full support for:
 
-These properties control mTLS configuration for Kafka client connections.
+- **StatefulSet Deployment**: Stable network identities and persistent storage
+- **Load Balancer Integration**: AWS Network Load Balancer support with health checks
+- **Pod Anti-Affinity**: Distributed scheduling across nodes for high availability
+- **Security Groups**: Fine-grained network access control
+- **SSL/TLS Termination**: End-to-end encryption support
 
-| Property | Description | Default |
-| :--- | :--- | :---: |
-| `ssl.client.auth` | Controls whether the proxy requests or requires client authentication (mTLS). Can be `required`, `requested`, or `none`. | `none` |
-| `ssl.truststore.location` | The path to the truststore file containing certificates from trusted clients. Required if `ssl.client.auth` is `required`. | |
-| `ssl.truststore.password` | The password for the truststore file. | |
-| `ssl.truststore.type` | The format of the truststore file. Valid values are `JKS` and `PKCS12`. | `JKS` |
+### AWS EKS Deployment
 
-## Solace Broker Connection Settings
+For complete AWS EKS deployment instructions, see: **[AWS EKS Deployment Guide](k8s/aws-eks-deploy/aws-eks-instructions.md)**
 
-These properties are used to configure the proxy's connection to the Solace PubSub+ Event Broker. They are standard Solace JCSMP properties. All Solace connection settings will have `solace` as a qualifier on the property path. This is to prevent conflicts with any Kafka properties, current or future. Includes SSL/TLS configuration for connection to Solace broker.
+The deployment includes:
+- Instance-specific and bootstrap load balancers
+- Security group configurations for SSL-only external access
+- Automated certificate management
+- Health check endpoints
+- Horizontal scaling support
 
-| Property | Description | Default |
-| :--- | :--- | :---: |
-| `solace.host` | **REQUIRED** The hostname or IP address of the Solace PubSub+ Event Broker, including the port. Ports specified should be for `SMF` connections. Examples: `tcps://my-broker.messaging.solace.cloud:55443`, `tcp://localhost:55555` |
-| `solace.vpn_name` | **REQUIRED** The Message VPN on the Solace broker to which the proxy will connect. |
+```bash
+# Quick deployment overview
+cd k8s/aws-eks-deploy
+./create-aws-security-groups.sh
+kubectl apply -f instance-lb.yaml
+kubectl apply -f bootstrap-lb.yaml
+kubectl apply -f proxy-config-map.yaml
+kubectl apply -f proxy-sts.yaml
+```
 
-> **NOTE:** Basic Auth 'username' and 'password' are specified by the Kafka producing application, using SASL
+## Configuration
 
-### Solace Client Security (SSL/TLS)
+The Kafka Proxy takes one command line argument: a properties file to configure all aspects of the proxy operation.
 
-SSL/TLS Settings for connections originating on the Proxy to the Solace broker.
-| Property | Description | Default |
-| :--- | :--- | :---: |
-| `solace.ssl.enabled.protocols` | A comma-separated list of the TLS protocols to enable. Example: `TLSv1.2`, `TLSv1.2,TLSv1.3` | `TLSv1.2` |
-| `solace.ssl.truststore.location` | The path to the truststore file containing certificates from Solace broker servers. Required if Solace broker server certificate is not public (self-signed or otherwise unknown). | |
-| `solace.ssl.truststore.password` | The password for the truststore file. | |
-| `solace.ssl.truststore.type` | The format of the truststore file. Valid values are `JKS` and `PKCS12`. | `JKS` |
+### Kafka Client Listener Configuration
 
-> **Note:** The proxy supports other standard SSL configuration properties.
+#### Basic Listener Settings
 
-### Solace Client mTLS
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `listeners` | Comma-separated list of `[protocol://]host:[port]` tuples for the proxy to listen on for Kafka client connections. Supported protocols: `PLAINTEXT`, `SASL_SSL`, `SSL`. Example: `PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094` | | ✅ |
+| `advertised.listeners` | Comma-separated list of `host:port` tuples to advertise to clients. Useful when proxy runs in containers or behind NAT. Must match the number of entries in `listeners`. Supports environment variable resolution: `${env:KAFKA_ADVERTISED_LISTENERS}` | Same as `listeners` | |
 
-These properties control mTLS configuration for Solace broker connections.
+#### SSL/TLS Configuration for Kafka Clients
 
-| Property | Description | Default |
-| :--- | :--- | :---: |
-| `solace.ssl.keystore.location` | The file path to the keystore file for the server's SSL certificate. Required for mTLS connections from the proxy to the Solace broker. | |
-| `solace.ssl.keystore.password` | The password for the keystore file. | |
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `ssl.keystore.location` | Path to the keystore file containing the server's SSL certificate (PKCS12 or JKS format) | | ✅ (for SSL) |
+| `ssl.keystore.password` | Password for the keystore file. Supports environment variable resolution: `${env:KAFKA_KEYSTORE_PASSWORD}` | | ✅ (for SSL) |
+| `ssl.keystore.type` | Format of the keystore file. Valid values: `JKS`, `PKCS12` | `JKS` | |
+| `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. Example: `TLSv1.2,TLSv1.3` | `TLSv1.2` | |
+| `ssl.cipher.suites` | Comma-separated list of SSL cipher suites to enable | JVM defaults | |
+| `ssl.protocol` | SSL protocol to use. Valid values: `TLS`, `TLSv1.1`, `TLSv1.2`, `TLSv1.3` | `TLS` | |
 
-## Proxy Operational Configuration
+#### mTLS (Mutual TLS) Configuration
 
-The following configurations affect the operation of the Kafka Wireline Proxy globally. The configuration parameters should be reviewed and set carefully to achieve the desired results. 
+These properties enable client certificate verification for enhanced security:
 
-| Property | Description | Default |
-| :--- | :--- | :---: |
-| `proxy.separators` | A string of characters to be treated as separators in a Kafka topic name. The proxy will replace these characters with `/` to create a hierarchical Solace topic when records are produced to a Kafka topic. Example setting: `._` If published Kafka topic name is: `my_kafka_topic` &rarr; published Solace topic: `my/kafka/topic` <br>Impacts **Producers / Published topics** | `""` |
-| `message.max.bytes` | The maximum size of a single message that a Kafka client can produce to a topic. Applies to all Kafka producers and topics.<br>Impacts **Producers** | `1048576` |
-| `proxy.request.handler.threads` | The number of worker threads for handling blocking Kafka consumer requests, such as `FETCH`. This value should be set to:<br>`[ Total expected consumers ] * [ 1.5 -> 2 ]`<br>Impacts **Consumer Scalability**| `32` |
-| `proxy.partitions.per.topic` | The number of virtual partitions to advertise per Kafka topic for ***consumer clients***. This value should be set to `[ Max consumers per Kafka topic ] * 2`.<br>See notes below on recommended settings <br>Impacts **Consumer Scalability**| `100` |
-| `proxy.max.uncommitted.messages` | The number of messages that can be received and uncommitted/unacknowledged by one Kafka consumer. Message delivery will resume after the client commits to offset and the flow acknowledges the messages. Higher values can lead to better performance but may cause redelivery of un-acknowledged messages if consumer drops prior to offset commit.<br>Impacts **Consumer Perforamance**| `1000` |
-| `proxy.queuename.qualifier` | A qualifier on expected queue name when consumer subscribes to a Kafka topic. <br>**Example:** Consumer subscribes to `TOPIC_A` for `group.id` = `GROUP1` and Qualifier = `KPROXY` then:<br>Queue Name = `KPROXY/TOPIC_A/GROUP1`<br>Impacts **Consumers, Expected Queue Names**| `""` |
-| `proxy.queuename.is.topicname` | Simply use the subscribed Kafka Topic name as the Solace Queue name. Ignore consumer `group.id` and  `proxy.queuename.qualifier` setting.<br>Value values: `true` or `false`. <br>Impacts **Consumers, Expected Queue Names**| `false` |
-| `proxy.fetch.compression.type` | Type of compression to use when fetching records from Kafka proxy. Valid values are `none`, `gzip`, `snappy`, `lz4`, and `zstd`. Applies to all Kafka topics and consumers using the proxy. <br>Impacts **Consumers, Proxy Performance, and Byte Rate**| `none` |
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `ssl.client.auth` | Client authentication mode. Values: `required` (mandatory mTLS), `requested` (optional mTLS), `none` (no client auth) | `none` | |
+| `ssl.truststore.location` | Path to truststore containing trusted client certificates. Required when `ssl.client.auth` is `required` | | ✅ (for mTLS) |
+| `ssl.truststore.password` | Password for the truststore file | | ✅ (for mTLS) |
+| `ssl.truststore.type` | Format of the truststore file. Valid values: `JKS`, `PKCS12` | `JKS` | |
 
-### Kafka Consumer Client
+### Solace Broker Connection Settings
 
-These properties control how the proxy handles `Fetch` requests from Kafka consumers.
+All Solace connection properties use the `solace.` prefix to prevent conflicts with Kafka properties.
 
-| Property | Description | Default |
-| :--- | :--- | :---: |
-| `fetch.max.wait.ms` | The maximum time in milliseconds that the proxy will wait before answering a fetch request if there isn't enough data to immediately satisfy `fetch.min.bytes`. Applies if value is not supplied by the consumer.| `500` |
-| `fetch.min.bytes` | Default minimum amount of data the proxy should return for a fetch request. The proxy will wait up to `fetch.max.wait.ms` for this amount of data to become available. Applies if value is not supplied by the consumer.| `1` |
-| `fetch.max.bytes` | Default maximum amount of data the proxy will return in a single fetch request. This acts as an absolute upper limit. Applies if value is not supplied by the consumer.| `1048576` |
+#### Basic Solace Connection
 
-**May need to revisit these - Perhaps the should be Maximums on the proxy side? Maybe just leave them out**
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `solace.host` | Solace broker hostname/IP with port for SMF connections. Examples: `tcps://broker.solace.cloud:55443`, `tcp://localhost:55555` | | ✅ |
+| `solace.vpn_name` | Message VPN name on the Solace broker | | ✅ |
+| `solace.username` | Username for Solace authentication (can be overridden by Kafka SASL) | | |
+| `solace.password` | Password for Solace authentication (can be overridden by Kafka SASL) | | |
+| `solace.connect_retries` | Number of connection retry attempts | `3` | |
+| `solace.reconnect_retries` | Number of reconnection attempts | `-1` (unlimited) | |
 
+#### Solace SSL/TLS Configuration
 
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `solace.ssl.enabled.protocols` | TLS protocols for Solace connections. Example: `TLSv1.2,TLSv1.3` | `TLSv1.2` | |
+| `solace.ssl.truststore.location` | Path to truststore for Solace broker certificates. Required for `tcps://` connections with self-signed certificates | | (conditional) |
+| `solace.ssl.truststore.password` | Password for the Solace truststore | | (conditional) |
+| `solace.ssl.truststore.type` | Truststore format. Valid values: `JKS`, `PKCS12` | `JKS` | |
+| `solace.ssl.validate_certificate` | Whether to validate Solace broker certificates | `true` | |
+| `solace.ssl.validate_certificate_date` | Whether to validate certificate dates | `true` | |
 
+#### Solace mTLS Configuration
 
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `solace.ssl.keystore.location` | Path to keystore for client certificates when connecting to Solace broker | | (for mTLS) |
+| `solace.ssl.keystore.password` | Password for the Solace client keystore | | (for mTLS) |
+| `solace.ssl.keystore.type` | Client keystore format. Valid values: `JKS`, `PKCS12` | `JKS` | |
+| `solace.ssl.private_key_alias` | Alias for the private key in the keystore | | (for mTLS) |
+| `solace.ssl.private_key_password` | Password for the private key | | (for mTLS) |
 
-**TODO: Move this to separate section and reference**
-> **Special Note on Kafka setting** `proxy.partitions.per.topic`:<br>The number Advertised Partitions per Kafka topic are not tied to the number of partitions on the Solace queue backing the virtual Kafka topic. Partition identifiers are only used to track consumers inside of the proxy. Setting this value higher than the number of partitions on the Solace queue will have no noticable effect on performance or function. Also, setting this value much higher than the actual number of expected consumers will have no noticable impact.
-> <br>**Example**: There are 2 kafka topics: `TOPIC_A` and `TOPIC_B`.
-> <br>&nbsp;&nbsp;&nbsp;&nbsp;`TOPIC_A` will have 2 consumer groups, each with maximum of 20 members for a total of **40 consumers**.
-> <br>&nbsp;&nbsp;&nbsp;&nbsp;`TOPIC_B` will have 1 consumer group with a maximum of **30 consumers**.
-> <br>&nbsp;&nbsp;&nbsp;&nbsp;`TOPIC_A` has the maximum consumers at `[ 2 Groups * 20 Consumers per Group ] = 40`
-> <br>&nbsp;&nbsp;&nbsp;&nbsp;So using `[ Max consumers per Kafka topic ] * 2` we get: `[ 40 ] * 2 = 80`
+### Proxy Operational Configuration
 
+#### Core Proxy Settings
 
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `proxy.separators` | Characters to replace with `/` in Kafka topic names to create hierarchical Solace topics. Example: `._` converts `my_kafka.topic` → `my/kafka/topic` | `""` (no conversion) | |
+| `message.max.bytes` | Maximum size of a single message that Kafka clients can produce (bytes) | `1048576` (1MB) | |
+| `proxy.request.handler.threads` | Worker threads for blocking Kafka consumer requests. Recommended: `[Total expected consumers] × 1.5-2` | `32` | |
+| `proxy.max.uncommitted.messages` | Maximum uncommitted messages per Kafka consumer before flow control. Higher values improve performance but risk redelivery | `1000` | |
 
+#### Consumer Scaling Configuration
 
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `proxy.partitions.per.topic` | Virtual partitions advertised per Kafka topic. Recommended: `[Max consumers per topic] × 2`. See detailed notes below | `100` | |
+| `proxy.queuename.qualifier` | Prefix for Solace queue names. Example: With qualifier `KAFKA-PROXY`, topic `ORDERS`, group `GROUP1` → queue `KAFKA-PROXY/ORDERS/GROUP1` | `""` | |
+| `proxy.queuename.is.topicname` | Use Kafka topic name as Solace queue name, ignoring group ID and qualifier. Values: `true`, `false` | `false` | |
+| `proxy.fetch.compression.type` | Compression for fetch responses. Values: `none`, `gzip`, `snappy`, `lz4`, `zstd` | `none` | |
 
+#### Kafka Consumer Defaults
 
+These properties set defaults when Kafka clients don't specify values:
 
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `fetch.max.wait.ms` | Maximum wait time for fetch requests when insufficient data available (milliseconds) | `500` | |
+| `fetch.min.bytes` | Minimum data amount for fetch requests (bytes) | `1` | |
+| `fetch.max.bytes` | Maximum data amount per fetch request (bytes) | `1048576` (1MB) | |
 
+#### Health Check Configuration
+
+| Property | Description | Default | Required |
+| :--- | :--- | :---: | :---: |
+| `proxy.healthcheckserver.create` | Enable HTTP health check server. Values: `true`, `false` | `false` | |
+| `proxy.healthcheckserver.port` | Port for health check endpoints (`/health`, `/ready`) | `8080` | (if enabled) |
+
+### Advanced Configuration
+
+#### Partition Configuration Details
+
+The `proxy.partitions.per.topic` setting is critical for consumer scalability:
+
+- **Purpose**: Virtual partitions enable parallel consumer processing
+- **Not tied to Solace queue partitions**: Purely for Kafka consumer coordination
+- **Higher values**: No performance penalty, enables more consumers
+- **Calculation**: `[Maximum expected consumers per topic] × 2`
+
+**Example Calculation:**
+- Topic A: 2 consumer groups × 20 consumers each = 40 max consumers
+- Topic B: 1 consumer group × 30 consumers = 30 max consumers  
+- Setting: `40 × 2 = 80` partitions per topic
+
+#### Environment Variable Resolution
+
+Properties support environment variable substitution:
+
+```properties
+# Basic environment variable
+advertised.listeners=${env:KAFKA_ADVERTISED_LISTENERS}
+
+# With default value
+ssl.keystore.password=${env:KAFKA_KEYSTORE_PASSWORD:defaultpass}
+
+# Kubernetes-specific tokens (resolved automatically)
+advertised.listeners=PLAINTEXT://${K8S_INTERNAL_HOSTNAME}:9092,SASL_SSL://${K8S_EXTERNAL_HOSTNAME}:9094
+```
+
+### Example Configuration Files
+
+#### Basic Configuration
+
+```properties
+# Kafka listener
+listeners=PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094
+
+# SSL configuration
+ssl.keystore.location=/app/keystore.pkcs12
+ssl.keystore.password=${env:KAFKA_KEYSTORE_PASSWORD}
+ssl.keystore.type=PKCS12
+ssl.enabled.protocols=TLSv1.2
+
+# Solace connection
+solace.host=tcps://broker.solace.cloud:55443
+solace.vpn_name=production-vpn
+
+# Proxy settings
+proxy.separators=._
+proxy.partitions.per.topic=50
+proxy.queuename.qualifier=KAFKA-PROXY
+message.max.bytes=5242880
+
+# Health checks
+proxy.healthcheckserver.create=true
+proxy.healthcheckserver.port=8080
+```
+
+#### Production Kubernetes Configuration
+
+```properties
+# Dynamic listeners for Kubernetes
+listeners=PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094
+advertised.listeners=${env:KAFKA_ADVERTISED_LISTENERS}
+
+# SSL with mounted certificates
+ssl.keystore.location=/app/keystore
+ssl.keystore.password=${env:KAFKA_KEYSTORE_PASSWORD}
+ssl.keystore.type=PKCS12
+ssl.enabled.protocols=TLSv1.2
+ssl.client.auth=none
+
+# Solace production broker
+solace.host=tcps://production.solace.cloud:55443
+solace.vpn_name=prod-vpn
+solace.ssl.validate_certificate=true
+
+# Production scaling
+proxy.request.handler.threads=64
+proxy.partitions.per.topic=100
+proxy.max.uncommitted.messages=2000
+message.max.bytes=10485760
+
+# Monitoring
+proxy.healthcheckserver.create=true
+proxy.healthcheckserver.port=8080
+```
+
+## Testing
+
+For testing the proxy with sample Kafka clients, see: **[Sample Kafka Client Demo](getting-started/SampleKafkaClient.md)**
+
+The demo includes embedded Java producer and consumer clients with configuration examples for both plaintext and SSL connections.
+
+## Authentication & Security
+
+### Kafka Client Authentication
+
+- **SASL_PLAINTEXT**: Username/password passed through to Solace broker
+- **SASL_SSL**: Username/password over TLS connection
+- **mTLS**: Client certificate verification for enhanced security
+
+### Solace Authentication
+
+- **Basic Auth**: Username/password from Kafka client SASL
+- **Client Certificates**: mTLS for certificate-based authentication
+- **OAuth**: Token-based authentication (when supported by Solace broker)
 
 ## Limitations
 
-*   Only `SASL_PLAINTEXT` or `SASL_SSL` authentication is supported. The provided username and password from the Kafka client is passed through to the Solace PubSub+ Event broker.
-*   Kafka Transactions and Compression are not supported.
+- **Authentication**: Only `SASL_PLAINTEXT` and `SASL_SSL` are supported
+- **Transactions**: Kafka transactions are not supported
+- **Compression**: Producer-side compression is not supported (consumer fetch compression is supported)
+- **Exactly-Once Semantics**: Not supported; at-least-once delivery semantics
+- **Admin Operations**: Kafka admin API operations are not supported
+
+## Monitoring & Observability
+
+### Health Endpoints
+
+When `proxy.healthcheckserver.create=true`:
+
+- **`/health`**: Overall proxy health status
+- **`/ready`**: Readiness for traffic (Kubernetes readiness probe)
+
+### Logging
+
+The proxy uses SLF4J for logging. Configure log levels in `logback.xml`:
+
+```xml
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <logger name="com.solace.kafka.kafkaproxy" level="INFO"/>
+    <logger name="com.solace.kafka.kafkaproxy.ProxyReactor" level="DEBUG"/>
+    
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>
+```
+
+### Metrics
+
+Key metrics to monitor:
+- Connection counts (Kafka clients and Solace)
+- Message throughput (messages/second, bytes/second)
+- Consumer lag and commit rates
+- Error rates and connection failures
+- Thread pool utilization
+
+## Troubleshooting
+
+### Common Issues
+
+1. **SSL Handshake Failures**: Verify certificate paths and passwords
+2. **Consumer Group Rebalancing**: Check `proxy.partitions.per.topic` setting
+3. **Connection Timeouts**: Verify network connectivity and security groups
+4. **Memory Issues**: Tune `proxy.max.uncommitted.messages` and JVM heap size
+
+### Debug Configuration
+
+```properties
+# Enable debug logging
+logging.level.com.solace.kafka.kafkaproxy=DEBUG
+
+# Increase health check verbosity
+logging.level.com.solace.kafka.kafkaproxy.HealthCheckServer=DEBUG
+```
 
 ## License
 
-This project is licensed under the Apache License Version 2.0.
+This project is licensed under the Apache License Version 2.0 - see the [LICENSE](LICENSE) file for details.
 
+## Contributing
 
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Submit a pull request
 
+## Support
 
-
-
-
-
-# pubsubplus-client-proxy-kafka-producer
-
-A proxy that allows a Kafka producer to publish to a PubSub+ topic without changes to the Kafka client application.
-
-## Description
-
-This project allows a Kafka producer application to publish topics to the PubSub+ event mesh via the proxy.
-The proxy talks the Kafka wireline protocol to the Kafka producer application, and talks the Solace wireline protocol to the
-Solace PubSub+ Event Mesh.
-
-The Kafka topic can be published to the Solace PubSub+ Event Mesh unmodified, or converted to a Solace hierarchical topic by
-splitting on a specified list of characters.
-
-
-## Getting Started
-
-### Dependencies
-
-* kafka-clients
-* sol-jcsmp
-* slf4j-api and the sl4j binding of your choice (see http://www.slf4j.org/manual.html)
-
-
-### Building
-
-Use either Maven or Gradle to build the application
-```
-mvn install
-java -cp target/kafkaproxy-1.0-SNAPSHOT-jar-with-dependencies.jar org.apache.kafka.solace.kafkaproxy.ProxyMain proxy-example.properties
-```
- ~ OR ~
-```
-./gradlew assemble
-cd build/distributions
-unzip kafkaproxy-1.0-SNAPSHOT.zip
-cd kafkaproxy-1.0-SNAPSHOT
-bin/kafkaproxy proxy-example.properties
-```
-
-### Executing program
-
-* The proxy take a mandatory properties filename on the command line
-* Mandatory property file entries:
-   - listeners : Comma-separated list of one or more ports to listen on for the Kafka wireline (protocol://host:port), e.g. PLAINTEXT://TheHost:9092,SSL://TheHost:9093
-   - host : the PubSub+ Event broker that the proxy should connect to, e.g. host=192.168.168.100
-* Other possible property file entries:
-   - vpn_name : The message VPN on the Solace PubSub+ Event broker to connect to
-   - advertised.listeners : Comma-separated list of ports to advertise (host:port). If specified, the number of entries 
-                            in "advertised.listeners" must match the number of entries in "listeners". This is used when 
-                            the external address that clients must connect to is different than the internal address
-                            that the proxy is listening on. This can occur, for example, when the proxy is running in a container.
-   - Kafka client transport layer security parameters, such as:
-       - ssl.keystore.location=server.private
-       - ssl.keystore.password=serverpw
-       - ssl.enabled.protocols=TLSv1.2
-
-
-
-
-## Help
-
-Depending on the producing rate of the producer application, the producer properties may have to be tuned to provide correct flow control.
-An appropriate method for this is to set buffer.memory, e.g. buffer.memory = 2000000
-The default for buffer.memory is 33554432 which can lead to the producer buffering a very large number of small records, leading to records timing out.
-
-### Limitations
-
-* Only SASL_PLAINTEXT or SASL_SSL authentication is supported - the provided username and password from the Kafka producer is passed through to the Solace PubSub+ Event broker
-* Transactions and compression are not supported
-
-## Authors
-
-Solace Corporation
-
-## License
-
-This project is licensed under the Apache License Version 2.0 - see the LICENSE.md file for details.
+For issues and questions:
+- **GitHub Issues**: Use for bug reports and feature requests
+- **Solace Community**: https://solace.community/
+- **Documentation**: https://docs.solace.com/
 
 
 

@@ -10,7 +10,9 @@ package com.solace.kafka.kafkaproxy;
 import static org.apache.kafka.common.utils.Utils.getHost;
 import static org.apache.kafka.common.utils.Utils.getPort;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -68,9 +70,24 @@ public class ProxyConfig  extends AbstractConfig {
     public static final String MAX_UNCOMMITTED_MESSAGES_PER_FLOW_DOC = "Maximum number of uncommitted messages read from a queue before Fetch requests halt.";
     public static final long DEFAULT_MAX_UNCOMMITTED_MESSAGES_PER_FLOW = 1_000L;
 
+    public static final String HEALTHCHECKSERVER_CREATE = PROXY_PROPERTY_PREFIX + "healthcheckserver.create";
+    public static final String HEALTHCHECKSERVER_CREATE_DOC = "If true, the health check server will be created and started. If false, the health check server will not be created.";
+
+    public static final String HEALTHCHECKSERVER_PORT = PROXY_PROPERTY_PREFIX + "healthcheckserver.port";
+    public static final String HEALTHCHECKSERVER_PORT_DOC = "Port on which the health check server will listen. Default is 8080.";
+    public static final int DEFAULT_HEALTHCHECKSERVER_PORT = 8080;
+
     private static final String PROPERTY_VALUE_PATTERN = "^\\$\\{(env:){0,1}(?<variableName>[A-Za-z0-9_]+)(:(?<defaultValue>.*)){0,1}\\}$";
     private static final Pattern PATTERN = Pattern.compile(PROPERTY_VALUE_PATTERN);
     private static final String VARIABLE_NAME = "variableName", DEFAULT_VALUE = "defaultValue";
+
+    // public static final String K8S_EXTERNAL_LB_HOSTNAMES = PROXY_PROPERTY_PREFIX + "k8s.external.lb.hostnames";
+    // public static final String K8S_EXTERNAL_LB_HOSTNAMES_DOC = "A comma-separated list of external load balancer hostnames for the Kafka proxy. Used to advertise the proxy to external clients.";
+
+    public static final String K8S_INTERNAL_HOSTNAME_TOKEN = "${K8S_INTERNAL_HOSTNAME}";
+    public static final String K8S_EXTERNAL_HOSTNAME_TOKEN = "${K8S_EXTERNAL_HOSTNAME}";
+    public static final String K8S_POD_NAME_ENV = "POD_NAME";
+    public static final String K8S_EXTERNAL_LB_HOSTNAMES_ENV = "EXTERNAL_LB_HOSTNAMES_LIST";
 
     private static Properties kafkaProperties;
 
@@ -81,20 +98,100 @@ public class ProxyConfig  extends AbstractConfig {
     public static ProxyConfig getInstance() {
         return proxyConfig;
     }
-    
-    public static String resolvePropertyValueFromEnv(final String propertyValue) {
-        if (propertyValue == null || propertyValue.isEmpty()) {
-            return "";
+
+    public static List<String> getAdvertisedListenersConfig() throws ConfigException {
+        // String advertisedListeners = proxyConfig.getString(ADVERTISED_LISTENERS_CONFIG);
+        List<String> advertisedListenersList = proxyConfig.getList(ADVERTISED_LISTENERS_CONFIG);
+        if (advertisedListenersList == null || advertisedListenersList.isEmpty()) {
+            return Collections.emptyList();
         }
+        boolean hasK8sInternalTokens = advertisedListenersList.stream()
+                .anyMatch(listener -> listener.contains(K8S_INTERNAL_HOSTNAME_TOKEN));
+        boolean hasK8sExternalTokens = advertisedListenersList.stream()
+                .anyMatch(listener -> listener.contains(K8S_EXTERNAL_HOSTNAME_TOKEN));
+        if (!hasK8sInternalTokens && !hasK8sExternalTokens) {
+            return proxyConfig.getList(ADVERTISED_LISTENERS_CONFIG);
+        }
+
+        // If we are here, the expectation is that we are running in Kubernetes
+        // If we are running in Kubernetes, we need to resolve the K8S_INTERNAL_HOSTNAME_TOKEN and K8S_EXTERNAL_HOSTNAME_TOKEN
+        // $EXTERNAL_LB_HOSTNAMES and $POD_FQDN_NAME environment variables are expected to be set if resolving ${K8S_EXTERNAL_HOSTNAME} 
+        // or ${K8S_INTERNAL_HOSTNAME} in advertised listeners respectively.
+        String k8sInternalHostname = "NOT_FOUND";
+        String k8sPodName = System.getenv(K8S_POD_NAME_ENV);
+        if (hasK8sInternalTokens) {
+            try {
+                k8sInternalHostname = InetAddress.getLocalHost().getCanonicalHostName();
+                if (k8sInternalHostname == null || k8sInternalHostname.isEmpty()) {
+                    throw new ConfigException("Cannot resolve Kubernetes internal hostname");
+                }
+            } catch (UnknownHostException e) {
+                throw new ConfigException("Cannot resolve Kubernetes internal hostname", e);
+            }
+        }
+
+        String k8sExternalHostname = "NOT_FOUND";
+        if (hasK8sExternalTokens) {
+            int podOrdinal = 0;     // Use StatefuleSet pod ordinal to resolve external hostname from advertised listeners
+            try {
+                // extract pod ordinal from pod name
+                int lastDashIndex = k8sPodName.lastIndexOf('-');
+                if (lastDashIndex != -1 && lastDashIndex < k8sPodName.length() - 1) {
+                    String ordinalStr = k8sPodName.substring(lastDashIndex + 1);
+                    podOrdinal = Integer.parseInt(ordinalStr);
+                }
+            } catch (NumberFormatException e) {
+                throw new ConfigException("Cannot extract pod ordinal from pod name: " + k8sPodName, e);
+            }
+
+            String k8sExternalHostnames = System.getenv(K8S_EXTERNAL_LB_HOSTNAMES_ENV);
+            if (k8sExternalHostnames == null || k8sExternalHostnames.isEmpty()) {
+                throw new ConfigException("Environment variable " + K8S_EXTERNAL_LB_HOSTNAMES_ENV + " is not set. Cannot resolve " + K8S_EXTERNAL_HOSTNAME_TOKEN +
+                                            ". Is variable " + K8S_EXTERNAL_LB_HOSTNAMES_ENV + " set in the environment? " +
+                                            "And does the list of loadbalancer hostnames match the number of pods in the StatefulSet?");
+            }
+            String[] externalHostnames = k8sExternalHostnames.split(",");
+            if (podOrdinal < 0 || podOrdinal >= externalHostnames.length) {
+                throw new ConfigException("Pod ordinal " + podOrdinal + " is out of bounds for external hostnames: " + k8sExternalHostnames + 
+                                            ". Is variable " + K8S_EXTERNAL_LB_HOSTNAMES_ENV + " set in the environment? " +
+                                            "And does the list of hostnames match the number of pods in the StatefulSet?");
+            }
+            k8sExternalHostname = externalHostnames[podOrdinal].trim();
+        }
+
+        List<String> resolvedListeners = new ArrayList<>();
+        for (String listener : advertisedListenersList) {
+            final String trimmedListener = listener.trim();
+            if (trimmedListener.contains(K8S_INTERNAL_HOSTNAME_TOKEN)) {
+                String resolvedListener = trimmedListener.replace(K8S_INTERNAL_HOSTNAME_TOKEN, k8sInternalHostname);
+                if (resolvedListener == null || resolvedListener.isEmpty()) {
+                    throw new ConfigException("Cannot resolve " + K8S_INTERNAL_HOSTNAME_TOKEN + " in advertised listeners: " + trimmedListener);
+                }
+                resolvedListeners.add(resolvedListener);
+            } else if (trimmedListener.contains(K8S_EXTERNAL_HOSTNAME_TOKEN)) {
+                String resolvedListener = trimmedListener.replace(K8S_EXTERNAL_HOSTNAME_TOKEN, k8sExternalHostname);
+                if (resolvedListener == null || resolvedListener.isEmpty()) {
+                    throw new ConfigException("Cannot resolve " + K8S_EXTERNAL_HOSTNAME_TOKEN + " in advertised listeners: " + trimmedListener);
+                }
+                resolvedListeners.add(resolvedListener);
+            } else {
+                resolvedListeners.add(trimmedListener);
+            }
+        }
+
+        return resolvedListeners;
+    }
+    
+    public static String resolvePropertyValueFromEnv(final String propertyValue) throws ConfigException{
+        if (propertyValue == null || propertyValue.isEmpty()) {
+            return null;
+        }
+
         final Matcher matcher = PATTERN.matcher(propertyValue);
         if (matcher.matches()) {
-            // String prefix = matcher.group(PREFIX);
             String variableName = matcher.group(VARIABLE_NAME);
             String defaultValue = matcher.group(DEFAULT_VALUE);
-            // String variableName = matcher.group(2);
-            // String defaultValue = matcher.group(3);
             defaultValue = defaultValue == null ? "" : defaultValue;
-
             String resolvedValue = System.getenv(variableName);
             return resolvedValue != null ? resolvedValue : defaultValue;
         } else {
@@ -189,9 +286,11 @@ public class ProxyConfig  extends AbstractConfig {
                                 .define(MAX_UNCOMMITTED_MESSAGES_PER_FLOW, Type.LONG, DEFAULT_MAX_UNCOMMITTED_MESSAGES_PER_FLOW, new ConfigDef.NonNullValidator(), Importance.MEDIUM, MAX_UNCOMMITTED_MESSAGES_PER_FLOW_DOC)
                                 .define(QUEUENAME_QUALIFIER, Type.STRING, "", new ConfigDef.NonNullValidator(), Importance.HIGH, QUEUENAME_QUALIFIER_DOC)
                                 .define(QUEUENAME_IS_TOPICNAME, Type.BOOLEAN, false, Importance.LOW, QUEUENAME_IS_TOPICNAME_DOC)
-                                .define(FETCH_COMPRESSION_TYPE, Type.STRING, DEFAULT_FETCH_COMPRESSION_TYPE, new ConfigDef.NonNullValidator(), Importance.LOW, FETCH_COMPRESSION_TYPE_DOC);
-    }
-    
+                                .define(FETCH_COMPRESSION_TYPE, Type.STRING, DEFAULT_FETCH_COMPRESSION_TYPE, new ConfigDef.NonNullValidator(), Importance.LOW, FETCH_COMPRESSION_TYPE_DOC)
+                                .define(HEALTHCHECKSERVER_CREATE, Type.BOOLEAN, false, Importance.MEDIUM, HEALTHCHECKSERVER_CREATE_DOC)
+                                .define(HEALTHCHECKSERVER_PORT, Type.INT, DEFAULT_HEALTHCHECKSERVER_PORT, Importance.MEDIUM, HEALTHCHECKSERVER_PORT_DOC);
+                                // .define(K8S_EXTERNAL_LB_HOSTNAMES, Type.STRING, "", new ConfigDef.NonNullValidator(), Importance.MEDIUM, K8S_EXTERNAL_LB_HOSTNAMES_DOC);
+    }    
     // TODO: Validate properties to ensure that values are valid before starting the proxy
 
     public ProxyConfig(Properties props) {

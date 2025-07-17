@@ -21,7 +21,7 @@ WORKDIR /app
 COPY --from=build /app/target/kafka-wireline-proxy*.jar app.jar
 
 # Kafka PLAINTEXT: 9092, SSL: 9094
-EXPOSE 9092 9094
+EXPOSE 8080 9092 9094
 
 ENV JAVA_OPTS=""
 

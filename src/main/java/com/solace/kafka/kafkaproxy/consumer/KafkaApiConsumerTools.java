@@ -307,7 +307,10 @@ public class KafkaApiConsumerTools {
         String compressionTypeString = ProxyConfig.getInstance().getString(ProxyConfig.FETCH_COMPRESSION_TYPE);
         if (compressionTypeString != null && !compressionTypeString.isEmpty()) {
             this.compressionType = Compression.of(compressionTypeString).build();
-            log.info("Consumer record batches will be compressed using {} algorithm", compressionTypeString);
+            if (this.compressionType != Compression.NONE) {
+                log.info("Consumer record batches will be compressed using '{}' algorithm", this.compressionType.type().name());
+            }
+            // log.info("Consumer record batches will be compressed using '{}' algorithm", compressionTypeString);
         } else {
             this.compressionType = Compression.NONE;
         }
@@ -316,8 +319,6 @@ public class KafkaApiConsumerTools {
             String maxWaitTimeMs = kafkaProperties.getProperty(PROP_FETCH_MAX_WAIT_MS, Integer.toString(DEFAULT_BROKER_MAX_WAIT_TIME_MS));
             String minBytes = kafkaProperties.getProperty(PROP_FETCH_MIN_BYTES, Integer.toString(DEFAULT_BROKER_MIN_BYTES));
             String maxBytes = kafkaProperties.getProperty(PROP_FETCH_MAX_BYTES, Integer.toString(DEFAULT_BROKER_MAX_BYTES));
-            // TODO: Implement max message size
-            // String messageMaxSizeBytes = kafkaProperties.getProperty(PROP_MESSAGE_MAX_BYTES, Integer.toString(DEFAULT_BROKER_MESSAGE_MAX_SIZE_BYTES));
 
             this.defaultBrokerMaxWaitTimeMs = Integer.parseInt(maxWaitTimeMs);
             this.defaultBrokerMinBytes = Integer.parseInt(minBytes);
@@ -870,6 +871,20 @@ public class KafkaApiConsumerTools {
                 .setThrottleTimeMs(0)
                 .setTopics(List.of(responseTopic));
         return new ListOffsetsResponse(responseData);
+    }
+
+    public static AbstractResponse createFetchResponseInvalidSessionId(
+        final FetchRequest request,
+        final RequestHeader requestHeader)
+    {
+        log.info("KafkaApiConsumerTools.createFetchResponseInvalidSessionId() -- Invalid sessionId in FetchRequest");
+
+        FetchResponseData responseData = new FetchResponseData()
+            .setThrottleTimeMs(0)
+            .setSessionId(request.data().sessionId())
+            .setErrorCode(Errors.FETCH_SESSION_ID_NOT_FOUND.code())
+            .setResponses(Collections.emptyList());
+        return new FetchResponse(responseData);
     }
 
     /**

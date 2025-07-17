@@ -268,7 +268,7 @@ public class ProxyReactor extends Thread {
         selector = SelectorProvider.provider().openSelector();
         workQueue = new LinkedBlockingQueue<WorkEntry>();
         final List<ProxyReactor.ListenEntry> listenerConfig = ProxyConfig.parseAndValidateListenAddresses(config.getList(ProxyConfig.LISTENERS_CONFIG));
-        final List<InetSocketAddress> advertisedListenerConfig = ProxyConfig.parseAndValidateAdvertisedListenAddresses(config.getList(ProxyConfig.ADVERTISED_LISTENERS_CONFIG));
+        final List<InetSocketAddress> advertisedListenerConfig = ProxyConfig.parseAndValidateAdvertisedListenAddresses(ProxyConfig.getAdvertisedListenersConfig());
         final int numListenPorts = listenerConfig.size();
         if ((advertisedListenerConfig != null) && 
             (advertisedListenerConfig.size() != numListenPorts)) {
