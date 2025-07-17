@@ -16,7 +16,7 @@
  */
 package com.solace.kafka.kafkaproxy.consumer;
 
-import com.solace.kafka.kafkaproxy.util.OpConstants;
+import com.solace.kafka.kafkaproxy.ProxyConfig;
 import com.solacesystems.jcsmp.BytesXMLMessage;
 import com.solacesystems.jcsmp.ConsumerFlowProperties;
 import com.solacesystems.jcsmp.EndpointProperties;
@@ -56,7 +56,7 @@ public class SolaceQueueConsumer {
 
     private FlowReceiver flowReceiver;
 
-    private static long maxUncommittedMessagesPerFlow = OpConstants.DEFAULT_MAX_UNCOMMITTED_MESSAGES_PER_FLOW;
+    private static volatile long maxUncommittedMessagesPerFlow = -1L;
 
     private volatile Long receivedOffset = -1L;          // # Received messages
 
@@ -85,6 +85,10 @@ public class SolaceQueueConsumer {
         this.session = session;
         this.queueName = queueName;
         queue = JCSMPFactory.onlyInstance().createQueue(this.queueName);
+        if (maxUncommittedMessagesPerFlow < 0L) {
+            // Only assign the first time
+            maxUncommittedMessagesPerFlow = ProxyConfig.getInstance().getLong(ProxyConfig.MAX_UNCOMMITTED_MESSAGES_PER_FLOW);
+        }
     }
 
     public class SolaceMessageEntryException extends Exception {

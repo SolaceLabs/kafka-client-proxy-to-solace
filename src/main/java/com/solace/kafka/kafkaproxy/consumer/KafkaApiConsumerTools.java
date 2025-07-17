@@ -109,6 +109,7 @@ import org.apache.kafka.common.requests.SyncGroupRequest;
 import org.apache.kafka.common.requests.SyncGroupResponse;
 import org.apache.kafka.common.utils.Time;
 
+import com.solace.kafka.kafkaproxy.ProxyConfig;
 import com.solace.kafka.kafkaproxy.ProxyReactor.ListenPort;
 import com.solace.kafka.kafkaproxy.consumer.SolaceQueueConsumer.SolaceMessageEntryException;
 import com.solace.kafka.kafkaproxy.util.OpConstants;
@@ -137,8 +138,7 @@ public class KafkaApiConsumerTools {
                 PROP_FETCH_MAX_WAIT_MS = "fetch.max.wait.ms",
                 PROP_FETCH_MIN_BYTES = "fetch.min.bytes",
                 PROP_FETCH_MAX_BYTES = "fetch.max.bytes",
-                PROP_MESSAGE_MAX_BYTES = "message.max.bytes",
-                PROP_PARTITIONS_PER_TOPIC = "partitions.per.topic";
+                PROP_MESSAGE_MAX_BYTES = "message.max.bytes";
 
     public static final byte MAGIC_BYTE = 0x02;
 
@@ -183,6 +183,7 @@ public class KafkaApiConsumerTools {
 
     private volatile Integer cachedLastPartitionMaxBytes;
 
+    // Used to determine if a consumer connection is stale
     private volatile Long lastSuccessfulFetchTimestamp;
 
     // Values provided on configuration of the instance
@@ -193,6 +194,8 @@ public class KafkaApiConsumerTools {
     private final Integer absoluleBrokerMaxBytes;
 
     private final Object fetchChannelLock = new Object();
+
+    private Compression compressionType;
 
     // TODO - Investigate 'throttleTimeMs' parameter in between requests. This is the mechanism used by Kafka
     // for flow control. The cluster can slow down response times, but also reports to the clients how
@@ -205,14 +208,13 @@ public class KafkaApiConsumerTools {
 
     private static final Map<Uuid, Integer> partitionIndexAssigner = new ConcurrentHashMap<>();
 
-    private static final int DEFAULT_PARTITIONS_PER_TOPIC = 100;
-
-    // TODO: Make partitionsPerTopic configurable
-    private static int partitionsPerTopic = DEFAULT_PARTITIONS_PER_TOPIC;
-
     private static int fetchSessionIdAssigner = 1_000;      // Start new fetch sessionId at 1000
 
     private static int generationIdAssigner = 1;
+
+    private static volatile String queueNameQualifier = null;
+
+    private static volatile int partitionsPerTopic = -1;
 
     private static synchronized int assignGenerationId() {
         return generationIdAssigner++;
@@ -222,8 +224,27 @@ public class KafkaApiConsumerTools {
         return fetchSessionIdAssigner++;
     }
 
+    private static String getQueueNameQualifier() {
+        if (queueNameQualifier == null) {
+            queueNameQualifier = ProxyConfig.getInstance().getString(ProxyConfig.QUEUENAME_QUALIFIER);
+            if (queueNameQualifier == null || queueNameQualifier.isEmpty()) {
+                queueNameQualifier = "";
+            } else {
+                queueNameQualifier = queueNameQualifier + "/";
+            }
+        }
+        return queueNameQualifier;
+    }
+
+    private static int getPartitionsPerTopic() {
+        if (partitionsPerTopic < 1) {
+            partitionsPerTopic = ProxyConfig.getInstance().getInt(ProxyConfig.PARTITIONS_PER_TOPIC);
+        }
+        return partitionsPerTopic;
+    }
+
     /**
-     * Call from Metadata connection to assign a new Partition Index if not already assigned
+     * Call from Group connection to assign a new Partition Index if not already assigned
      * @param topicName
      * @param partitionIndex
      * @return
@@ -237,7 +258,7 @@ public class KafkaApiConsumerTools {
     }
 
     /**
-     * Call from Metadata connection to assign a new Partition Index if not already assigned
+     * Call from Group connection to assign a new Partition Index if not already assigned
      * @param topicId
      * @param partitionIndex
      * @return
@@ -247,7 +268,7 @@ public class KafkaApiConsumerTools {
             return partitionIndex;
         }
         if (partitionIndexAssigner.containsKey(topicId)) {
-            int newIndex = ( partitionIndexAssigner.get(topicId) + 1 ) % partitionsPerTopic;
+            int newIndex = ( partitionIndexAssigner.get(topicId) + 1 ) % getPartitionsPerTopic();
             partitionIndexAssigner.put(topicId, newIndex);
             return newIndex;
         }
@@ -282,12 +303,22 @@ public class KafkaApiConsumerTools {
     {
         this.solaceSession = jcsmpSession;
         resetSubscription();
+
+        String compressionTypeString = ProxyConfig.getInstance().getString(ProxyConfig.FETCH_COMPRESSION_TYPE);
+        if (compressionTypeString != null && !compressionTypeString.isEmpty()) {
+            this.compressionType = Compression.of(compressionTypeString).build();
+            if (this.compressionType != Compression.NONE) {
+                log.info("Consumer record batches will be compressed using '{}' algorithm", this.compressionType.type().name());
+            }
+            // log.info("Consumer record batches will be compressed using '{}' algorithm", compressionTypeString);
+        } else {
+            this.compressionType = Compression.NONE;
+        }
+
         try {
             String maxWaitTimeMs = kafkaProperties.getProperty(PROP_FETCH_MAX_WAIT_MS, Integer.toString(DEFAULT_BROKER_MAX_WAIT_TIME_MS));
             String minBytes = kafkaProperties.getProperty(PROP_FETCH_MIN_BYTES, Integer.toString(DEFAULT_BROKER_MIN_BYTES));
             String maxBytes = kafkaProperties.getProperty(PROP_FETCH_MAX_BYTES, Integer.toString(DEFAULT_BROKER_MAX_BYTES));
-            // TODO: Implement max message size
-            // String messageMaxSizeBytes = kafkaProperties.getProperty(PROP_MESSAGE_MAX_BYTES, Integer.toString(DEFAULT_BROKER_MESSAGE_MAX_SIZE_BYTES));
 
             this.defaultBrokerMaxWaitTimeMs = Integer.parseInt(maxWaitTimeMs);
             this.defaultBrokerMinBytes = Integer.parseInt(minBytes);
@@ -616,15 +647,13 @@ public class KafkaApiConsumerTools {
         long endTimestamp = startTimestamp + requestMaxWaitTimeMs;
         int remainingTime = requestMaxWaitTimeMs;
         long currentOffset = requestOffset;
-        // long newReceivedOffset = -1L, newCommittedOffset = -1L;
         long lastOffsetAddedToBundle = requestOffset - 1L;
         MemoryRecords memoryRecords = null;
         MemoryRecordsBuilder builder = 
                 new MemoryRecordsBuilder(
                         buffer,
                         RecordBatch.CURRENT_MAGIC_VALUE,
-                        // CompressionType.NONE,               // Kafka < 3.9
-                        Compression.NONE,                // Kafka >= 3.9
+                        compressionType,
                         TimestampType.CREATE_TIME,
                         requestOffset,          // Starting offset to return
                         startTimestamp,       // This will be the maxTimestamp for the batch with CREATE_TIME
@@ -764,6 +793,8 @@ public class KafkaApiConsumerTools {
             log.trace("Returning empty FETCH response");
         }
         lastSuccessfulFetchTimestamp = Time.SYSTEM.milliseconds();
+        log.trace("Last successful Fetch timestampe: {}", lastSuccessfulFetchTimestamp);
+
         return new FetchResponse(responseData);
     }
 
@@ -842,6 +873,20 @@ public class KafkaApiConsumerTools {
         return new ListOffsetsResponse(responseData);
     }
 
+    public static AbstractResponse createFetchResponseInvalidSessionId(
+        final FetchRequest request,
+        final RequestHeader requestHeader)
+    {
+        log.info("KafkaApiConsumerTools.createFetchResponseInvalidSessionId() -- Invalid sessionId in FetchRequest");
+
+        FetchResponseData responseData = new FetchResponseData()
+            .setThrottleTimeMs(0)
+            .setSessionId(request.data().sessionId())
+            .setErrorCode(Errors.FETCH_SESSION_ID_NOT_FOUND.code())
+            .setResponses(Collections.emptyList());
+        return new FetchResponse(responseData);
+    }
+
     /**
      * This method creates Metadata response for a single topic, 
      * reporting a configured number of partitions -- Metadata, ApiKey=3
@@ -871,6 +916,7 @@ public class KafkaApiConsumerTools {
 
         final List<MetadataResponseData.MetadataResponsePartition> partitionList = new ArrayList<>();
 
+        final int partitionsPerTopic = getPartitionsPerTopic();
         for (int partitionId = 0; partitionId < partitionsPerTopic; partitionId++) {
             MetadataResponseData.MetadataResponsePartition partitionMetadata = new MetadataResponseData.MetadataResponsePartition()
                     .setPartitionIndex(partitionId).setErrorCode(Errors.NONE.code()).setLeaderEpoch(OpConstants.LEADER_EPOCH).setLeaderId(OpConstants.LEADER_ID_TOPIC_PARTITION)
@@ -1242,7 +1288,8 @@ public class KafkaApiConsumerTools {
     {
         HeartbeatResponseData responseData = new HeartbeatResponseData();
         responseData.setThrottleTimeMs(0);
-        responseData.setErrorCode(Errors.REBALANCE_IN_PROGRESS.code());
+        // TODO: Evaluate if should use UNKNOWN_MEMBER_ID or REBALANCING
+        responseData.setErrorCode(Errors.UNKNOWN_MEMBER_ID.code());
         return new HeartbeatResponse(responseData);
     }
 
@@ -1265,6 +1312,7 @@ public class KafkaApiConsumerTools {
                     new OffsetCommitResponseData.OffsetCommitResponsePartition()
                     .setPartitionIndex(partition.partitionIndex())
                     .setErrorCode(Errors.UNKNOWN_MEMBER_ID.code());
+                // TODO: Evaluate if should use UNKNOWN_MEMBER_ID or REBALANCING
                 responseTopic.partitions().add(responsePartition);
             });
             responseData.topics().add(responseTopic);
@@ -1357,8 +1405,12 @@ public class KafkaApiConsumerTools {
         /**
          * Here is where we subscribe to the queue
          */
-        // TODO: Make Queue name prefix an optional configuration item
-        String queueName = "KAFKA-PROXY-QUEUE/" + topicName + (groupId != null && !groupId.isEmpty() ? ("/" + groupId) : "");        // TODO: Derive queue name
+        String queueName;
+        if (ProxyConfig.getInstance().getBoolean(ProxyConfig.QUEUENAME_IS_TOPICNAME)) {
+            queueName = topicName;
+        } else {
+            queueName = getQueueNameQualifier() + topicName + (groupId != null && !groupId.isEmpty() ? ("/" + groupId) : "");
+        }
         try {
             log.debug("Subscribing to queue: {}", queueName);
             this.solaceQueueConsumer = SolaceQueueConsumer.createAndStartQueueConsumer(solaceSession, queueName);

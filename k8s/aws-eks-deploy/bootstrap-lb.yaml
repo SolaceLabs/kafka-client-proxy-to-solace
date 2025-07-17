@@ -1,0 +1,36 @@
+---
+# LoadBalancer Service for Kafka Wireline Proxy -- Bootstrap Service
+# This load balancer host/address should be used by clients as the bootstrap server
+# It will round-robin to any running pod in the proxy StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-wireline-proxy-bootstrap-lb
+  namespace: kafka-proxy
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-target-type: "instance"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    # set your preferred AWS security group ID for the load balancer here
+    # This is optional, if not set, the default security group will be used
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-0123456789abcdef0"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8080"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/health"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "30"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "6"
+    # service.beta.kubernetes.io/aws-load-balancer-healthcheck-healthy-threshold: "2"
+    # service.beta.kubernetes.io/aws-load-balancer-healthcheck-unhealthy-threshold: "1"
+spec:
+  type: LoadBalancer
+  selector:
+    app: kafka-wireline-proxy
+  ports:
+    # - Bootstrap ports (round-robin to any pod via regular service)
+    # - For externally facing load balancer, these should be secure ports only
+    #   or security policy should be applied to restrict access
+    # - Ports should match to ports in the StatefulSet
+    - name: kafka-ssl-bootstrap
+      port: 9094
+      targetPort: 9094

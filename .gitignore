@@ -41,4 +41,6 @@ bin/
 
 # Test configs
 # May contain secrets
-src/test/resources/configs
+getting-started/configs
+
+k8s/__dev-*/**

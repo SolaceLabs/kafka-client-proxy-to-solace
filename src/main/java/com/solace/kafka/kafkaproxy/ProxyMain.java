@@ -18,14 +18,14 @@ import java.io.IOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
 public class ProxyMain {
-    
-    private static final String KAFKA_PROPERTY_PREFIX = "kafka.proxy.";
-    private static final String SOLACE_PROPERTY_PREFIX = "solace.proxy.";
+
+    // Solace JCSMP Properties and SSL config for Proxy->Broker connection
+    private static final String SOLACE_PROPERTY_PREFIX = "solace.";
 
     private static final Logger log = LoggerFactory.getLogger(ProxyMain.class);
     private final String clusterId;
+    private HealthCheckServer healthCheckServer = null;
     
     public ProxyMain() {
         UUID uuid = UUID.randomUUID();
@@ -56,20 +56,44 @@ public class ProxyMain {
         for (Object key : props.keySet()) {
             final String propName = (String) key;
             if (propName.startsWith(SOLACE_PROPERTY_PREFIX)) {
-                solaceProperties.put(propName.substring(SOLACE_PROPERTY_PREFIX.length()), props.getProperty(propName));
-            } else if (propName.startsWith(KAFKA_PROPERTY_PREFIX)) {
-                kafkaProperties.put(propName.substring(KAFKA_PROPERTY_PREFIX.length()), props.getProperty(propName));
+                solaceProperties.put(propName.substring(SOLACE_PROPERTY_PREFIX.length()), ProxyConfig.resolvePropertyValueFromEnv(props.getProperty(propName)));
+            } else {
+                kafkaProperties.put(propName, ProxyConfig.resolvePropertyValueFromEnv(props.getProperty(propName)));
             }
         }
-        
+
         ProxyPubSubPlusClient.getInstance().configure(solaceProperties);
+
+        final ProxyConfig proxyConfig = new ProxyConfig(kafkaProperties);
+        try {
+            if (proxyConfig.getBoolean(ProxyConfig.HEALTHCHECKSERVER_CREATE)) {
+                healthCheckServer = new HealthCheckServer();
+                int healthCheckPort = proxyConfig.getInt(ProxyConfig.HEALTHCHECKSERVER_PORT);
+                healthCheckServer.start(healthCheckPort);
+                log.info("Health check server started on port {}", healthCheckPort);
+            } else {
+                log.info("Health check server creation is disabled.");
+            }
+        } catch (IOException e) {
+            log.error("Failed to start health check server: {}", e.getMessage());
+            return;
+        }
         
         try {
-            final ProxyReactor proxyReactor = new ProxyReactor(new ProxyConfig(kafkaProperties), clusterId);
+            final ProxyReactor proxyReactor = new ProxyReactor(proxyConfig, clusterId);
             proxyReactor.start();
+
+            if (healthCheckServer != null) {
+                healthCheckServer.setHealthy(false);
+            }
+
             proxyReactor.join();
         } catch (Exception e) {
             log.warn(e.toString());
+        } finally {
+            if (healthCheckServer != null) {
+                healthCheckServer.stop();
+            }
         }
         log.info("Proxy no longer running");
     }

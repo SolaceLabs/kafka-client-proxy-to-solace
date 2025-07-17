@@ -4,7 +4,7 @@
  
   <groupId>com.solace.kafkawireline</groupId>
   <artifactId>kafka-wireline-proxy</artifactId>
-  <version>1.2</version>
+  <version>0.1.0</version>
   <packaging>jar</packaging>
 
   <name>Kafka Wireline Proxy</name>
@@ -17,6 +17,13 @@
   <developers>
     <developer>
       <name>Jonathan Bosloy</name>
+      <organization>Solace</organization>
+      <organizationUrl>https://solace.com</organizationUrl>
+    </developer>
+    <developer>
+      <name>Andrew MacKenzie</name>
+      <organization>Solace</organization>
+      <organizationUrl>https://solace.com</organizationUrl>
     </developer>
     <developer>
       <name>Dennis Brinley</name>
@@ -122,7 +129,7 @@
           <appendAssemblyId>false</appendAssemblyId>
           <archive>
             <manifest>
-              <mainClass>org.apache.kafka.solace.kafkaproxy.ProxyMain</mainClass>
+              <mainClass>com.solace.kafka.kafkaproxy.ProxyMain</mainClass>
             </manifest>
           </archive>
           <descriptorRefs>

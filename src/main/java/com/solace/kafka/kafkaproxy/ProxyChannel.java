@@ -103,7 +103,9 @@ public class ProxyChannel {
 	private boolean idempotentProducer = false;
 	private boolean firstRequestWithProducerId = true;
 	private long recordBatchSequenceNumber = 0L;
+	private final int maxProduceMessageBytes;
 	private boolean consumerMetadataChannel = false;
+	private boolean sessionClosed = false;
 
 	private static int channelIdGenerator = 0;
 	private int channelId = channelIdGenerator++;
@@ -338,6 +340,7 @@ public class ProxyChannel {
 		enableKafkaSaslAuthenticateHeaders = false;
 		produceResponseProcesssing = new ProxyChannel.ProduceResponseProcessing();
 		listenPort.addChannel(this);
+		maxProduceMessageBytes = ProxyConfig.getInstance().getInt(ProxyConfig.PRODUCE_MESSAGE_MAX_BYTES);
 		sendQueue = new LinkedList<Send>();
 	}
 
@@ -508,6 +511,47 @@ public class ProxyChannel {
 				// Produce Data Channel
 
 				ProduceRequest produceRequest = (ProduceRequest) requestAndSize.request;
+
+				// --- VALIDATION: Check for oversized messages before processing ---
+				for (ProduceRequestData.TopicProduceData topicData : produceRequest.data().topicData()) {
+					for (ProduceRequestData.PartitionProduceData partitionData : topicData.partitionData()) {
+						MemoryRecords records = (MemoryRecords) partitionData.records();
+						for (Record record : records.records()) {
+							if (record.sizeInBytes() > this.maxProduceMessageBytes) {
+								log.warn("Rejecting PRODUCE request. Record for topic {} is {} bytes, which exceeds the limit of {}.",
+										topicData.name(), record.sizeInBytes(), this.maxProduceMessageBytes);
+
+								// If one record is too large, the entire request is rejected.
+								ProduceResponseData.TopicProduceResponseCollection errorResponseCollection = new ProduceResponseData.TopicProduceResponseCollection();
+								for (ProduceRequestData.TopicProduceData tpd : produceRequest.data().topicData()) {
+									List<PartitionProduceResponse> partitionResponses = new LinkedList<>();
+									for (ProduceRequestData.PartitionProduceData ppd : tpd.partitionData()) {
+										partitionResponses.add(new PartitionProduceResponse()
+											.setIndex(ppd.index())
+											.setErrorCode(Errors.MESSAGE_TOO_LARGE.code())
+											.setBaseOffset(-1L)
+											.setLogAppendTimeMs(-1L)
+											.setLogStartOffset(-1L));
+									}
+									errorResponseCollection.add(new TopicProduceResponse()
+										.setName(tpd.name())
+										.setPartitionResponses(partitionResponses));
+								}
+
+								ProduceResponse errorResponse = new ProduceResponse(
+									new ProduceResponseData()
+										.setResponses(errorResponseCollection)
+										.setThrottleTimeMs(0)
+								);
+
+								Send send = errorResponse.toSend(requestHeader.toResponseHeader(), requestHeader.apiVersion());
+								dataToSend(send, apiKey);
+								return true; // Stop processing this request and signal completion.
+							}
+						}
+					}
+				}
+
 				// First we need to determine the number of topic records
 
                 Iterator<ProduceRequestData.TopicProduceData> it = produceRequest.data().topicData().iterator();
@@ -536,8 +580,11 @@ public class ProxyChannel {
                         int recordCount = 0;
                         MemoryRecords records = (MemoryRecords) partitionData.records();
 
+						
+
 						// If idempotent producer, detect potential duplicates and reject if found
 						// Assumes that the sequence numbers always increment between batches and gaps are Ok
+						// TODO: Test rejection sent as expected for duplicate sequence or sequence Out of order
 						if (idempotentProducer) {
 	                        AbstractIterator<MutableRecordBatch> batchIt = records.batchIterator();
 							int lastSeqInRequest = 0;
@@ -635,6 +682,17 @@ public class ProxyChannel {
 						dataToSend(send, apiKey);
 						break;
 					}
+
+					if (kafkaApiConsumerTools == null) {
+						log.error("[Channel {}] KafkaApiConsumerTools is null for FETCH request -- likely consumer reconnecting", this.channelId);
+						log.debug("On consumer reconnect, we will tell the consumer that the session is bad to force group rejoin");
+						// Send a bad session response to the consumer
+						final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
+						AbstractResponse fetchResponseInvalidSession = KafkaApiConsumerTools.createFetchResponseInvalidSessionId(fetchRequest, requestHeader);
+						Send send = fetchResponseInvalidSession.toSend(requestHeader.toResponseHeader(), version);
+						dataToSend(send, apiKey);
+						break;
+					}
 				}
 
 				final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
@@ -664,6 +722,13 @@ public class ProxyChannel {
                         result.addToWorkQueue(); // Add to ProxyReactor's workQueue
                     }
                 });
+
+				// Fetch/Data Channel uses session established on group coordinator channel
+				if (!sessionClosed) {
+					this.session.close();
+					sessionClosed = true;
+				}
+
                 return false; // Stop reading from channel, wait for async result via workQueue
             }
             case LIST_OFFSETS: {
@@ -802,6 +867,14 @@ public class ProxyChannel {
 						KafkaApiConsumerTools.createFindCoordinatorResponse(findCoordinatorRequest, requestHeader, listenPort);
 				Send send = findCoordinatorResponse.toSend(requestHeader.toResponseHeader(), version);
 				dataToSend(send, apiKey);
+
+				// Metadata Channel -- Static channel does not require Solace Broker I/O
+				// Producers may publish to the same metadata/data plane channel so only close the session
+				// if we know it is a consumer channel
+				if (consumerMetadataChannel &&!sessionClosed) {
+					this.session.close();
+					sessionClosed = true;
+				}
 
                 break;
             }

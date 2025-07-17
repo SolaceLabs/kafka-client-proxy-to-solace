@@ -1,6 +1,70 @@
 # Running Producer Demo from command line
 
+## Run proxy image
 
+```bash
+
+
+podman build -t ghcr.io/solacelabs/kafka-client-proxy-to-solace:0.1.0 .
+podman build -t ghcr.io/solacelabs/kafka-client-proxy-to-solace:0.1.0 -t ghcr.io/solacelabs/kafka-client-proxy-to-solace:latest .
+
+export CR_PAT=$(cat ~/.ghp_pat)
+echo $CR_PAT | podman login ghcr.io -u dennis-brinley --password-stdin
+
+
+podman push ghcr.io/solacelabs/kafka-client-proxy-to-solace:0.1.0
+podman push ghcr.io/solacelabs/kafka-client-proxy-to-solace:latest
+
+# podman push --all-tags ghcr.io/solacelabs/kafka-client-proxy-to-solace
+
+
+
+kubectl create secret generic kafka-keystore \
+  --from-file=keystore=/path/to/keystore.pkcs12 \
+  -n kproxy
+
+
+kubectl create namespace kafka-proxy
+
+kubectl create secret generic kafka-keystore --from-file=keystore=/Users/dennisbrinley/Development/Projects/kafka-wireline/certs/keystore.pkcs12 -n kafka-proxy
+
+
+kubectl create secret generic kafka-keystore-password \
+  --from-literal=KAFKA_KEYSTORE_PASSWORD=serverpass \
+  -n kafka-proxy
+
+
+
+
+
+```
+
+
+
+```bash
+
+## Run using podman
+
+podman run \
+  -v /path/to/keystore.pkcs12:/app/keystore.pkcs12:ro \
+  -v /path/to/truststore.jks:/app/truststore.jks:ro \
+  -v /path/to/config.properties:/app/proxy.properties \
+  -e JAVA_OPTS="-XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 -Xms512m -Xmx1536m" \
+  kafka-proxy:1.2
+
+
+
+podman run -d --name kafka-proxy \
+  -v /Users/dennisbrinley/Development/Projects/kafka-wireline/certs/keystore.pkcs12:/app/keystore.pkcs12:ro \
+  -v /Users/dennisbrinley/Development/Projects/kafka-wireline/certs/trusted.jks:/app/truststore.jks:ro \
+  -v /Users/dennisbrinley/Development/Projects/kafka-wireline/kafka-client-proxy-to-solace/getting-started/configs/container-proxy.properties:/app/proxy.properties \
+  -e JAVA_OPTS="-XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 -Xms512m -Xmx1g" \
+  -p 9092:9092 -p 9094:9094 \
+  kafka-proxy:1.2
+
+
+
+```
 
 ## Run Proxy
 
@@ -14,9 +78,26 @@ java -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 -jar target/
 
 
 
+java \
+  --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+  --add-opens java.base/java.nio=ALL-UNNAMED \
+  --add-opens java.base/java.lang=ALL-UNNAMED \
+  --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
+  --add-opens java.base/java.util=ALL-UNNAMED \
+  --add-opens java.base/java.util.concurrent=ALL-UNNAMED \
+  -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 \
+  -jar target/kafka-wireline-proxy-1.2.jar test-data/configs/demo-proxy.properties
+
+
 ```
 
 ## Run Producer
+
+
+```bash
+java -cp demo-producer/target/kafka-demo-producer-3.9.1.jar com.solace.kafka.wireline.kafkaproxy.demo.LargeFileGenerator getting-started/test-data/publish-long-record.txt
+```
+
 
 ```bash
 
@@ -116,7 +197,7 @@ Requires Queue `MY_TEST_QUEUE` with subscription to published topic
 ```bash
 kafka-console-producer.sh \
   --bootstrap-server localhost:9092 \
-  --producer.config demo-producer/src/test/resources/configs/demo-producer.properties \
+  --producer.config path/to/console-producer.properties \
   --topic KAFKA_WIRELINE_TOPIC
 
 stm receive -q MY_TEST_QUEUE --output-mode FULL

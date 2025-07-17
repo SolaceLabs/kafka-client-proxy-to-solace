@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-proxy-config
+  namespace: kafka-proxy
+data:
+  proxy.properties: |
+    ## KAFKA SETTINGS
+    ##########################
+
+    listeners: ${env:KAFKA_LISTENERS:PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094}
+
+    # advertised.listeners (OPTIONAL):
+    # For cloud providers, this is usually the public IP address
+    # This is often required if running in a container as well
+    # Number of entries must = number of listeners
+    # - K8S_INTERNAL_HOSTNAME and K8S_EXTERNAL_HOSTNAME do not need to be set directly
+    # - K8S_INTERNAL_HOSTNAME - If used will be extracted from the pod name
+    # - K8S_EXTERNAL_HOSTNAME - If used will be extracted from the EXTERNAL_LB_HOST_LIST environment variable
+    # - If not set, the listeners will be used as advertised listeners
+    advertised.listeners: PLAINTEXT://${K8S_INTERNAL_HOSTNAME}:9092,SASL_SSL://${K8S_EXTERNAL_HOSTNAME}:9094
+
+    ## KAFKA SECURITY SETTINGS
+    ##########################
+    # Keystore location mounted by the container by default:
+    ssl.keystore.location: /app/keystore
+    ssl.keystore.password: ${env:KAFKA_KEYSTORE_PASSWORD:password}
+    ssl.keystore.type: ${env:KAFKA_KEYSTORE_TYPE:PKCS12}
+    ssl.enabled.protocols: TLSv1.2
+    ## Other standard SSL settings for Kafka can be added here
+
+    ## KAFKA SSL TRUSTSTORE SETTINGS - mTLS
+    # Keystore is not mounted by default, but can be added if needed
+    # ssl.truststore.location: path/to/truststore/trusted.jks
+    # ssl.truststore.password: trusted
+    # ssl.truststore.type: JKS
+    # ssl.endpoint.identification.algorithm: 
+
+    ## SOLACE SETTINGS
+    ##########################
+    solace.host:     ${env:SOLACE_HOST:tcps://localhost:55443}
+    solace.vpn_name: ${env:SOLACE_VPN_NAME:default}
+    solace.ssl.enabled.protocols: TLSv1.2
+
+    ## SOLACE SSL TRUSTSTORE SETTINGS - for connections to Solace broker
+    # solace.ssl.truststore.location: path/to/truststore/trusted.jks
+    # solace.ssl.truststore.password: trusted
+    # solace.ssl.truststore.type: JKS
+    # solace.ssl.endpoint.identification.algorithm: 
+
+    ## PROXY-WIDE SETTINGS
+    ##########################
+    proxy.healthcheckserver.create: true
+    proxy.healthcheckserver.port: 8080
+    # Note: changing the healthcheck port will require updating:
+    # - load balancer healthcheck settings
+    # - and the container port in the stateful set
+    # - and the container port in the container image
+
+    ## PRODUCER SETTINGS
+    ##########################
+    proxy.separators: _.
+    message.max.bytes: 1048576
+
+    ## CONSUMER SETTINGS
+    ##########################
+    proxy.request.handler.threads: 32
+    proxy.partitions.per.topic: 50
+    proxy.queuename.qualifier: KAFKA-PROXY
+    proxy.queuename.is.topicname: false
+    proxy.fetch.compression.type: none
+    proxy.max.uncommitted.messages: 1000

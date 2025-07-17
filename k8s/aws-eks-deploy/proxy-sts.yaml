@@ -1,0 +1,160 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka-wireline-proxy
+  namespace: kafka-proxy
+spec:
+  # Use a headless service for stable DNS names
+  serviceName: kafka-wireline-proxy-headless
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kafka-wireline-proxy
+  template:
+    metadata:
+      labels:
+        app: kafka-wireline-proxy
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - kafka-wireline-proxy
+                topologyKey: kubernetes.io/hostname
+          ### Change to the following for strict anti-affinity
+          # requiredDuringSchedulingIgnoredDuringExecution:
+          #   - labelSelector:
+          #       matchExpressions:
+          #         - key: app
+          #           operator: In
+          #           values:
+          #             - kafka-wireline-proxy
+          #     topologyKey: kubernetes.io/hostname
+      containers:
+        - name: kafka-wireline-proxy
+          image: ghcr.io/solacelabs/kafka-client-proxy-to-solace:0.1.0
+          imagePullPolicy: Always
+          env:
+            - name: JAVA_OPTS
+              value: "-Xms512m -Xmx1g -XX:MaxMetaspaceSize=256m -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name    # Required for extracting the pod name and stateful set ordinal
+
+            # EXTERNAL_LB_HOST_LIST - Resolve 'advertised.listeners' for each pod in the StatefulSet using an external load balancer.
+            # A value will be selected from the list based on the pod ordinal to replace ${K8S_EXTERNAL_HOSTNAME} token in advertised.listeners.
+            # Note: This variable is only used for the external listeners.
+            #
+            # Value must be a comma-separated list of hostnames. Each hostname should be resolvable to the external load balancer IP address.
+            # Or the list can contain IP addresses if the load balancer does not have a DNS name.
+            #
+            # Each item in the list corresponds to a Kubernetes POD in the proxy Stateful Set. There must be an equal number of hostnames
+            # in the list as there are PODs in the Stateful Set.
+            #
+            # Example:
+            #    - EXTERNAL_LB_HOST_LIST=lb0.example.com,lb1.example.com,lb2.example.com
+            #    - Proxy Stateful Set is 'kproxy' and replicas is 3
+            #    - In configmap, advertised.listeners: PLAINTEXT://${K8S_EXTERNAL_HOSTNAME}:9092,SASL_SSL://${K8S_EXTERNAL_HOSTNAME}:9094
+            #    - Then the proxy will resolve the advertised.listeners of each pod as follows:
+            #      1. Pod: kproxy-0 --> advertised.listeners: PLAINTEXT://lb0.example.com:9092,SASL_SSL://lb0.example.com:9094
+            #      2. Pod: kproxy-1 --> advertised.listeners: PLAINTEXT://lb1.example.com:9092,SASL_SSL://lb1.example.com:9094
+            #      3. Pod: kproxy-2 --> advertised.listeners: PLAINTEXT://lb2.example.com:9092,SASL_SSL://lb2.example.com:9094
+            #
+            # Note: Use ${K8S_INTERNAL_HOSTNAME} token in advertised.listeners to resolve the internal hostname of the pod.
+            # Example:
+            #    - EXTERNAL_LB_HOST_LIST=lb0.example.com,lb1.example.com,lb2.example.com
+            #    - Proxy Stateful Set is 'kproxy' and replicas is 3
+            #    - In configmap, advertised.listeners: PLAINTEXT://${K8S_INTERNAL_HOSTNAME}:9092,SASL_SSL://${K8S_EXTERNAL_HOSTNAME}:9094
+            #    - Then the proxy will resolve the advertised.listeners of each pod as follows:
+            #      1. Pod: kproxy-0 --> advertised.listeners: PLAINTEXT://kproxy-0.kproxy.kafka-proxy.svc.cluster.local:9092,SASL_SSL://lb0.example.com:9094
+            #      2. Pod: kproxy-1 --> advertised.listeners: PLAINTEXT://kproxy-1.kproxy.kafka-proxy.svc.cluster.local:9092,SASL_SSL://lb1.example.com:9094
+            #      3. Pod: kproxy-2 --> advertised.listeners: PLAINTEXT://kproxy-2.kproxy.kafka-proxy.svc.cluster.local:9092,SASL_SSL://lb2.example.com:9094
+            #
+            - name: EXTERNAL_LB_HOSTNAMES_LIST
+              value: "REPLACE_WITH_ACTUAL_LB_HOST_LIST" # Comma-separated list of external LB hostnames
+            - name: KAFKA_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-keystore-password
+                  key: KAFKA_KEYSTORE_PASSWORD
+            # - name: KAFKA_KEYSTORE_TYPE
+            #   value: "PKCS12"
+            # - name: SOLACE_HOST
+            #   value: "tcps://localhost:55443"
+            # - name: SOLACE_VPN_NAME
+            #   value: "default"
+          ports:
+            # Set to match the container ports
+            - name: kafka-plaintext
+              containerPort: 9092
+            - name: kafka-ssl
+              containerPort: 9094
+            - name: health          # This port is used for Kubernetes health checks
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          volumeMounts:
+            - name: kafka-keystore-volume
+              mountPath: /app/keystore
+              subPath: keystore
+              readOnly: true
+            - name: proxy-config-volume
+              mountPath: /app/proxy.properties
+              subPath: proxy.properties
+              readOnly: true
+          resources:
+            limits:
+              memory: "1280Mi"
+              cpu: "1"
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: kafka-keystore-volume
+          secret:
+            secretName: kafka-keystore
+        - name: proxy-config-volume
+          configMap:
+            name: kafka-proxy-config
+---
+# Headless service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-wireline-proxy-headless
+  namespace: kafka-proxy
+spec:
+  clusterIP: None
+  selector:
+    app: kafka-wireline-proxy
+  ports:
+    # Headless service ports for stable DNS names
+    # Set to match the container ports
+    - name: kafka-plaintext-port
+      port: 9092
+    - name: kafka-ssl-port
+      port: 9094

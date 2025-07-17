@@ -1,0 +1,81 @@
+# LoadBalancer Service for Kafka Wireline Proxy -- Instance Load Balancer
+############################################################################
+# #####   Create one LoadBalancer service per instance / Pod replica   #####
+# #####   There should be one CRD per instance in the StatefulSet      #####
+############################################################################
+# - The loadbalancer hostnames/addresses should be used to set the EXTERNAL_LB_HOST_LIST
+#   environment variable in the StatefulSet definition.
+# - The value will be used to resolve 'advertised.listeners' in the Kafka Wireline Proxy StatefulSet configmap.
+# - This service will allow clients to connect directly to the instance.
+# - The service name will be used as the hostname for the instance
+---
+# POD-0
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-wireline-proxy-instance-lb-0
+  namespace: kafka-proxy
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-target-type: "instance"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    # set your preferred AWS security group ID for the load balancer here
+    # This is optional, if not set, the default security group will be used
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-0123456789abcdef0"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8080"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/health"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "30"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "6"
+    # service.beta.kubernetes.io/aws-load-balancer-healthcheck-healthy-threshold: "2"
+    # service.beta.kubernetes.io/aws-load-balancer-healthcheck-unhealthy-threshold: "1"
+spec:
+  type: LoadBalancer
+  selector:
+    app: kafka-wireline-proxy
+    # IMPORTANT: Ensure this matches the pod name for the specific instance/Pod replica
+    statefulset.kubernetes.io/pod-name: kafka-wireline-proxy-0    # Targets only the kafka-0 pod
+  ports:
+    # - Bootstrap ports (round-robin to any pod via regular service)
+    # - For externally facing load balancer, these should be secure ports only
+    #   or security policy should be applied to restrict access
+    # - Ports should match to ports in the StatefulSet
+    - name: kafka-ssl-bootstrap
+      port: 9094
+      targetPort: 9094
+---
+# POD-1
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-wireline-proxy-instance-lb-1
+  namespace: kafka-proxy
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-target-type: "instance"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    # set your preferred AWS security group ID for the load balancer here
+    # This is optional, if not set, the default security group will be used
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-0123456789abcdef0"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8080"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/health"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "30"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "6"
+    # service.beta.kubernetes.io/aws-load-balancer-healthcheck-healthy-threshold: "2"
+    # service.beta.kubernetes.io/aws-load-balancer-healthcheck-unhealthy-threshold: "1"
+spec:
+  type: LoadBalancer
+  selector:
+    app: kafka-wireline-proxy
+    # IMPORTANT: Ensure this matches the pod name for the specific instance/Pod replica
+    statefulset.kubernetes.io/pod-name: kafka-wireline-proxy-1    # Targets only the kafka-1 pod
+  ports:
+    # - For externally facing load balancer, these should be secure ports only
+    #   or security policy should be applied to restrict access
+    # - Ports should match to ports in the StatefulSet
+    - name: kafka-ssl-bootstrap
+      port: 9094
+      targetPort: 9094
