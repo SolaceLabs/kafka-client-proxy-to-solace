@@ -23,7 +23,7 @@ ls target/kafka-wireline-proxy-*-jar-with-dependencies.jar
 
 ## Configuration Files
 
-The sample configuration files are located in the `sample-configs/` directory:
+The sample configuration files are located in the `getting-started/` directory:
 
 - **`demo-producer.properties`** - Producer configuration with SASL authentication
 - **`demo-consumer.properties`** - Consumer configuration with SASL authentication
@@ -34,8 +34,8 @@ Edit the configuration files to match your environment:
 
 ```bash
 # Copy sample files to working directory
-cp sample-configs/demo-producer.properties .
-cp sample-configs/demo-consumer.properties .
+cp getting-started/demo-producer.properties .
+cp getting-started/demo-consumer.properties .
 
 # Edit producer config
 vi demo-producer.properties
@@ -67,7 +67,7 @@ First, ensure the Kafka Proxy is running:
 ```bash
 # From the project root directory
 java -jar target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     sample-configs/proxy-example.properties
+     getting-started/proxy-example.properties
 ```
 
 The proxy should display:
