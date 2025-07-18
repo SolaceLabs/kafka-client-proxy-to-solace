@@ -92,7 +92,7 @@ java -Dlogback.configurationFile=logback.xml \
 java -jar build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar /path/to/proxy.properties
 
 # Run directly with Gradle (development mode)
-./gradlew run-proxy --args="sample-configs/proxy-example.properties"
+./gradlew run-proxy --args="getting-started/proxy-example.properties"
 
 # Example with JVM tuning options
 java -Xms512m -Xmx2g -XX:+UseG1GC \
@@ -109,14 +109,14 @@ java -Dlogback.configurationFile=logback.xml \
 
 ```bash
 # Run demo producer
-./gradlew run-demo-producer --args="sample-configs/demo-producer.properties test-topic 10"
+./gradlew run-demo-producer --args="getting-started/demo-producer.properties test-topic 10"
 
 # Run demo consumer
-./gradlew run-demo-consumer --args="sample-configs/demo-consumer.properties test-topic test-group"
+./gradlew run-demo-consumer --args="getting-started/demo-consumer.properties test-topic test-group"
 
 # Run multiple instances for testing
-./gradlew run-demo-consumer --args="sample-configs/demo-consumer.properties test-topic group-a" &
-./gradlew run-demo-consumer --args="sample-configs/demo-consumer.properties test-topic group-b" &
+./gradlew run-demo-consumer --args="getting-started/demo-consumer.properties test-topic group-a" &
+./gradlew run-demo-consumer --args="getting-started/demo-consumer.properties test-topic group-b" &
 ```
 
 ### Docker Container
@@ -398,7 +398,7 @@ proxy.healthcheckserver.port=8080
 
 ## Testing
 
-For testing the proxy with sample Kafka clients, see: **[Sample Kafka Client Demo](sample-configs/SampleKafkaClient.md)**
+For testing the proxy with sample Kafka clients, see: **[Sample Kafka Client Demo](getting-started/SampleKafkaClient.md)**
 
 The demo includes embedded Java producer and consumer clients with configuration examples for both plaintext and SSL connections.
 
