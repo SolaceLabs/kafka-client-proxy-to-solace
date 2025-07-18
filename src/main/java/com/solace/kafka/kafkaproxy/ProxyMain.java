@@ -84,7 +84,7 @@ public class ProxyMain {
             proxyReactor.start();
 
             if (healthCheckServer != null) {
-                healthCheckServer.setHealthy(false);
+                healthCheckServer.setHealthy(true);
             }
 
             proxyReactor.join();
