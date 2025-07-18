@@ -138,29 +138,6 @@ tasks.register<JavaExec>("run-proxy") {
     }
 }
 
-// Create demo client tasks (if they exist in the project)
-tasks.register<JavaExec>("run-demo-producer") {
-    group = "demo"
-    description = "Run the demo producer client"
-    classpath = sourceSets.main.get().runtimeClasspath
-    mainClass.set("com.solace.kafka.kafkaproxy.demo.DemoProducer")
-    
-    if (project.hasProperty("args")) {
-        args = project.property("args").toString().split(" ")
-    }
-}
-
-tasks.register<JavaExec>("run-demo-consumer") {
-    group = "demo"
-    description = "Run the demo consumer client"
-    classpath = sourceSets.main.get().runtimeClasspath
-    mainClass.set("com.solace.kafka.kafkaproxy.demo.DemoConsumer")
-    
-    if (project.hasProperty("args")) {
-        args = project.property("args").toString().split(" ")
-    }
-}
-
 // Publishing configuration matching Maven metadata
 publishing {
     publications {
