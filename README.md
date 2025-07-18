@@ -24,7 +24,8 @@ For consumers, the proxy manages consumer groups and topic subscriptions, mappin
 - **Java 17+** - Required runtime
 - **kafka-clients** - Kafka protocol implementation
 - **sol-jcsmp** - Solace messaging API
-- **slf4j-api** - Logging framework
+- **slf4j-api** - Logging API
+- **log4j2** - Logging implementation
 
 ### Building
 
@@ -41,7 +42,7 @@ cd kafka-client-proxy-to-solace
 mvn clean package
 
 # The built JAR will be available at:
-target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar
+target/kafka-wireline-proxy-*.jar
 ```
 
 #### Using Gradle
@@ -57,13 +58,10 @@ cd kafka-client-proxy-to-solace
 ./gradlew clean build
 
 # The built JAR will be available at:
-build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar
+build/libs/kafka-wireline-proxy-*.jar
 
-# Display project information
-./gradlew info
-
-# Show dependency tree for debugging
-./gradlew dependencies
+# Run directly with Gradle (development mode)
+./gradlew run-proxy --args="getting-started/sample-configs/proxy-example.properties"
 ```
 
 ### Running as JAR
@@ -72,16 +70,16 @@ build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar
 
 ```bash
 # Run the proxy with a properties file
-java -jar target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar /path/to/proxy.properties
+java -jar target/kafka-wireline-proxy-*.jar /path/to/proxy.properties
 
 # Example with JVM tuning options
 java -Xms512m -Xmx2g -XX:+UseG1GC \
-     -jar target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar \
+     -jar target/kafka-wireline-proxy-*.jar \
      /path/to/proxy.properties
 
 # With custom logging configuration
-java -Dlogback.configurationFile=logback.xml \
-     -jar target/kafka-wireline-proxy-<version>-jar-with-dependencies.jar \
+java -Dlog4j.configurationFile=log4j2.xml \
+     -jar target/kafka-wireline-proxy-*.jar \
      /path/to/proxy.properties
 ```
 
@@ -89,35 +87,59 @@ java -Dlogback.configurationFile=logback.xml \
 
 ```bash
 # Run the proxy with a properties file
-java -jar build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar /path/to/proxy.properties
+java -jar build/libs/kafka-wireline-proxy-*.jar /path/to/proxy.properties
 
 # Run directly with Gradle (development mode)
-./gradlew run-proxy --args="getting-started/proxy-example.properties"
+./gradlew run-proxy --args="getting-started/sample-configs/proxy-example.properties"
 
 # Example with JVM tuning options
 java -Xms512m -Xmx2g -XX:+UseG1GC \
-     -jar build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar \
+     -jar build/libs/kafka-wireline-proxy-*.jar \
      /path/to/proxy.properties
 
 # With custom logging configuration
-java -Dlogback.configurationFile=logback.xml \
-     -jar build/libs/kafka-wireline-proxy-<version>-jar-with-dependencies.jar \
+java -Dlog4j.configurationFile=log4j2.xml \
+     -jar build/libs/kafka-wireline-proxy-*.jar \
      /path/to/proxy.properties
+```
+
+#### Building Demo Clients
+
+The project includes separate demo client applications in their own sub-projects:
+
+```bash
+# Build all projects (proxy and demo clients)
+mvn clean package
+
+# This creates:
+# - Main proxy JAR
+ls target/kafka-wireline-proxy-*.jar
+# - Demo producer JAR  
+ls demo-producer/target/kafka-demo-producer-*.jar
+# - Demo consumer JAR
+ls demo-consumer/target/kafka-demo-consumer-*.jar
 ```
 
 #### Running Demo Clients with Gradle
 
 ```bash
-# Run demo producer
-./gradlew run-demo-producer --args="getting-started/demo-producer.properties test-topic 10"
+# Build all projects including demo clients
+./gradlew clean build
 
-# Run demo consumer
-./gradlew run-demo-consumer --args="getting-started/demo-consumer.properties test-topic test-group"
+# Run demo producer (from separate JAR)
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config getting-started/sample-configs/demo-producer.properties \
+     --topic PRODUCE_TO:test-topic \
+     --num-records 10
 
-# Run multiple instances for testing
-./gradlew run-demo-consumer --args="getting-started/demo-consumer.properties test-topic group-a" &
-./gradlew run-demo-consumer --args="getting-started/demo-consumer.properties test-topic group-b" &
+# Run demo consumer (from separate JAR)
+java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
+     -c getting-started/sample-configs/demo-consumer.properties \
+     -g test-group \
+     -t test-topic
 ```
+
+> **Note**: The version number in the demo client JAR files reflects the Kafka client library version used for compilation (e.g., `kafka-demo-producer-3.9.1.jar` was compiled with Kafka client version 3.9.1).
 
 ### Docker Container
 
@@ -400,7 +422,7 @@ proxy.healthcheckserver.port=8080
 
 For testing the proxy with sample Kafka clients, see: **[Sample Kafka Client Demo](getting-started/SampleKafkaClient.md)**
 
-The demo includes embedded Java producer and consumer clients with configuration examples for both plaintext and SSL connections.
+The demo includes separate Java producer and consumer applications with their own JAR files, providing configuration examples for both plaintext and SSL connections. Each demo client uses command-line arguments for configuration rather than embedded classes.
 
 ## Authentication & Security
 
@@ -435,23 +457,32 @@ When `proxy.healthcheckserver.create=true`:
 
 ### Logging
 
-The proxy uses SLF4J for logging. Configure log levels in `logback.xml`:
+The proxy uses SLF4J with Apache Log4j2 for logging. Configure log levels in `log4j2.xml`:
 
 ```xml
-<configuration>
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
-        </encoder>
-    </appender>
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </Console>
+        <File name="File" fileName="logs/proxy.log">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </File>
+    </Appenders>
     
-    <logger name="com.solace.kafka.kafkaproxy" level="INFO"/>
-    <logger name="com.solace.kafka.kafkaproxy.ProxyReactor" level="DEBUG"/>
-    
-    <root level="INFO">
-        <appender-ref ref="STDOUT"/>
-    </root>
-</configuration>
+    <Loggers>
+        <Logger name="com.solace.kafka.kafkaproxy" level="INFO"/>
+        <Logger name="com.solace.kafka.kafkaproxy.ProxyReactor" level="DEBUG"/>
+        <Logger name="com.solacesystems.jcsmp" level="INFO"/>
+        <Logger name="org.apache.kafka" level="WARN"/>
+        
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="File"/>
+        </Root>
+    </Loggers>
+</Configuration>
 ```
 
 ### Metrics
@@ -475,11 +506,12 @@ Key metrics to monitor:
 ### Debug Configuration
 
 ```properties
-# Enable debug logging
-logging.level.com.solace.kafka.kafkaproxy=DEBUG
+# Enable debug logging (set in log4j2.xml)
+# Or via system properties:
+# -Dlog4j2.logger.com.solace.kafka.kafkaproxy.level=DEBUG
 
 # Increase health check verbosity
-logging.level.com.solace.kafka.kafkaproxy.HealthCheckServer=DEBUG
+# -Dlog4j2.logger.com.solace.kafka.kafkaproxy.HealthCheckServer.level=DEBUG
 ```
 
 ## License
@@ -500,6 +532,3 @@ For issues and questions:
 - **GitHub Issues**: Use for bug reports and feature requests
 - **Solace Community**: https://solace.community/
 - **Documentation**: https://docs.solace.com/
-
-
-

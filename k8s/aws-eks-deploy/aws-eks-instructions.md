@@ -17,7 +17,7 @@ aws eks update-kubeconfig --region us-east-2 --name kproxy-cluster
 kubectl get nodes
 
 # Navigate to deployment directory
-cd ~/Development/Projects/kafka-wireline/kafka-client-proxy-to-solace/k8s/aws-deploy
+cd k8s/aws-eks-deploy
 ```
 
 ## Create Security Groups
@@ -35,12 +35,12 @@ kubectl create namespace kafka-proxy
 ```bash
 # Create keystore secret from PKCS12 file
 kubectl create secret generic kafka-keystore \
-  --from-file=keystore=/Users/dennisbrinley/Development/Projects/kafka-wireline/certs/keystore.pkcs12 \
+  --from-file=keystore=/path/to/certs/keystore.pkcs12 \
   -n kafka-proxy
 
 # Create keystore password secret
 kubectl create secret generic kafka-keystore-password \
-  --from-literal=KAFKA_KEYSTORE_PASSWORD=serverpass \
+  --from-literal=KAFKA_KEYSTORE_PASSWORD=password \
   -n kafka-proxy
 ```
 
@@ -126,7 +126,7 @@ echo "Testing plaintext connection..."
 nc -zv $BOOTSTRAP_LB 9092
 
 # Test with Kafka client (replace with your test topic)
-# kafka-console-producer.sh --bootstrap-server $BOOTSTRAP_LB:9094 --topic test-topic --producer.config ssl.properties
+# kafka-console-producer.sh --bootstrap-server $BOOTSTRAP_LB:9094 --topic PRODUCE_TO:test-topic --producer.config ssl.properties
 ```
 
 ## Troubleshooting

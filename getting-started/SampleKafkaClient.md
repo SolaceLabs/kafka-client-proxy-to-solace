@@ -11,19 +11,26 @@ This guide demonstrates how to build and execute the embedded demo producer and 
 
 ## Building the Demo Clients
 
-The demo clients are included in the main project. Build the entire project to compile the demo clients:
+The demo clients are in separate sub-projects with their own directories. Build the entire project to compile both the proxy and demo clients:
 
 ```bash
 # From the project root directory
 mvn clean package
 
-# This creates the JAR with all demo clients included
-ls target/kafka-wireline-proxy-*-jar-with-dependencies.jar
+# This creates separate JAR files:
+# - Main proxy JAR
+ls target/kafka-wireline-proxy-*.jar
+# - Demo producer JAR  
+ls demo-producer/target/kafka-demo-producer-*.jar
+# - Demo consumer JAR
+ls demo-consumer/target/kafka-demo-consumer-*.jar
 ```
+
+> **Note**: The version number in the JAR file of ***Kafka Demo Clients*** name reflects the version of the Kafka client library that was used to compile it. For example, `kafka-demo-producer-3.9.1.jar` indicates it was compiled with Kafka client version 3.9.1.
 
 ## Configuration Files
 
-The sample configuration files are located in the `getting-started/` directory:
+The sample configuration files are located in the `getting-started/sample-configs/` directory:
 
 - **`demo-producer.properties`** - Producer configuration with SASL authentication
 - **`demo-consumer.properties`** - Consumer configuration with SASL authentication
@@ -34,8 +41,8 @@ Edit the configuration files to match your environment:
 
 ```bash
 # Copy sample files to working directory
-cp getting-started/demo-producer.properties .
-cp getting-started/demo-consumer.properties .
+cp getting-started/sample-configs/demo-producer.properties .
+cp getting-started/sample-configs/demo-consumer.properties .
 
 # Edit producer config
 vi demo-producer.properties
@@ -66,8 +73,8 @@ First, ensure the Kafka Proxy is running:
 
 ```bash
 # From the project root directory
-java -jar target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     getting-started/proxy-example.properties
+java -jar target/kafka-wireline-proxy-*.jar \
+     getting-started/sample-configs/proxy-example.properties
 ```
 
 The proxy should display:
@@ -83,18 +90,17 @@ INFO: Health check server started on port 8080
 Open a new terminal and start the demo consumer:
 
 ```bash
-# Run the embedded demo consumer
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoConsumer \
-     demo-consumer.properties \
-     test-topic \
-     test-group
+# Run the demo consumer from its own JAR
+java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
+     -c demo-consumer.properties \
+     -g test-group \
+     -t test-topic
 ```
 
 **Command Arguments:**
-- `demo-consumer.properties` - Consumer configuration file
-- `test-topic` - Kafka topic to subscribe to
-- `test-group` - Consumer group ID
+- `-c demo-consumer.properties` - Consumer configuration file
+- `-g test-group` - Consumer group ID
+- `-t test-topic` - Kafka topic to subscribe to
 
 **Expected Output:**
 ```
@@ -109,18 +115,17 @@ Waiting for messages...
 Open another terminal and start the demo producer:
 
 ```bash
-# Run the embedded demo producer
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoProducer \
-     demo-producer.properties \
-     test-topic \
-     10
+# Run the demo producer from its own JAR
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config demo-producer.properties \
+     --topic PRODUCE_TO:test-topic \
+     --num-records 10
 ```
 
 **Command Arguments:**
-- `demo-producer.properties` - Producer configuration file
-- `test-topic` - Kafka topic to publish to
-- `10` - Number of messages to send
+- `--config demo-producer.properties` - Producer configuration file
+- `--topic PRODUCE_TO:test-topic` - Kafka topic to publish to (note the PRODUCE_TO prefix)
+- `--num-records 10` - Number of messages to send
 
 **Expected Output:**
 ```
@@ -166,21 +171,17 @@ ssl.endpoint.identification.algorithm=
 
 ```bash
 # Consumer with SSL
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoConsumer \
-     demo-consumer.properties \
-     ssl-test-topic \
-     ssl-test-group
+java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
+     -c demo-consumer.properties \
+     -g ssl-test-group \
+     -t ssl-test-topic
 
 # Producer with SSL
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoProducer \
-     demo-producer.properties \
-     ssl-test-topic \
-     5
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config demo-producer.properties \
+     --topic PRODUCE_TO:ssl-test-topic \
+     --num-records 5
 ```
-
-## Consumer Groups
 
 ### Test Multiple Consumers
 
@@ -188,18 +189,16 @@ Start multiple consumers in the same group:
 
 ```bash
 # Terminal 1 - Consumer 1
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoConsumer \
-     demo-consumer.properties \
-     test-topic \
-     test-group
+java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
+     -c demo-consumer.properties \
+     -g test-group \
+     -t test-topic
 
 # Terminal 2 - Consumer 2
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoConsumer \
-     demo-consumer.properties \
-     test-topic \
-     test-group
+java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
+     -c demo-consumer.properties \
+     -g test-group \
+     -t test-topic
 ```
 
 Messages will be distributed between the consumers in the same group.
@@ -208,18 +207,16 @@ Messages will be distributed between the consumers in the same group.
 
 ```bash
 # Consumer Group A
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoConsumer \
-     demo-consumer.properties \
-     test-topic \
-     group-a
+java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
+     -c demo-consumer.properties \
+     -g group-a \
+     -t test-topic
 
 # Consumer Group B
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoConsumer \
-     demo-consumer.properties \
-     test-topic \
-     group-b
+java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
+     -c demo-consumer.properties \
+     -g group-b \
+     -t test-topic
 ```
 
 Both consumers will receive all messages since they're in different groups.
@@ -232,11 +229,10 @@ Test topic name conversion (if `proxy.separators` is configured):
 
 ```bash
 # This topic name will be converted: my_test.topic -> my/test/topic
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoProducer \
-     demo-producer.properties \
-     my_test.topic \
-     5
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config demo-producer.properties \
+     --topic PRODUCE_TO:my_test.topic \
+     --num-records 5
 ```
 
 ### High-Volume Testing
@@ -245,11 +241,36 @@ Generate more messages for throughput testing:
 
 ```bash
 # Send 1000 messages
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoProducer \
-     demo-producer.properties \
-     perf-test-topic \
-     1000
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config demo-producer.properties \
+     --topic PRODUCE_TO:perf-test-topic \
+     --num-records 1000
+```
+
+### Testing with Input Files
+
+Use custom test data from files:
+
+```bash
+# Producer with custom input file
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config demo-producer.properties \
+     --topic PRODUCE_TO:file-test-topic \
+     --input-file /path/to/test-data/messages.txt \
+     --num-records 50
+```
+
+### Testing with Delays
+
+Add delays between messages for controlled testing:
+
+```bash
+# Producer with 100ms delay between messages
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config demo-producer.properties \
+     --topic PRODUCE_TO:delayed-topic \
+     --num-records 10 \
+     -d 100
 ```
 
 ### Batch Testing
@@ -258,18 +279,16 @@ Run multiple producers simultaneously:
 
 ```bash
 # Terminal 1
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoProducer \
-     demo-producer.properties \
-     batch-topic \
-     50 &
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config demo-producer.properties \
+     --topic PRODUCE_TO:batch-topic \
+     --num-records 50 &
 
 # Terminal 2
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoProducer \
-     demo-producer.properties \
-     batch-topic \
-     50 &
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config demo-producer.properties \
+     --topic PRODUCE_TO:batch-topic \
+     --num-records 50 &
 ```
 
 ## Demo Client Options
@@ -277,36 +296,47 @@ java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
 ### DemoProducer Usage
 
 ```bash
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoProducer \
-     <config-file> \
-     <topic-name> \
-     <message-count> \
-     [key-prefix]
+java -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config <config-file> \
+     --topic PRODUCE_TO:<topic-name> \
+     --num-records <message-count> \
+     [--input-file <input-file>] \
+     [-d <delay-millis>]
 ```
 
 **Parameters:**
-- `config-file` - Producer properties file
-- `topic-name` - Target Kafka topic
-- `message-count` - Number of messages to send
-- `key-prefix` - Optional message key prefix
+- `--config <config-file>` - Producer properties file
+- `--topic PRODUCE_TO:<topic-name>` - Target Kafka topic (PRODUCE_TO prefix required)
+- `--num-records <message-count>` - Number of messages to send
+- `--input-file <input-file>` - Optional: Custom input file for message content
+- `-d <delay-millis>` - Optional: Delay between messages in milliseconds
 
 ### DemoConsumer Usage
 
 ```bash
-java -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoConsumer \
-     <config-file> \
-     <topic-name> \
-     <group-id> \
-     [poll-duration-ms]
+java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
+     -c <config-file> \
+     -g <group-id> \
+     -t <topic-name>
 ```
 
 **Parameters:**
-- `config-file` - Consumer properties file
-- `topic-name` - Kafka topic to subscribe to
-- `group-id` - Consumer group identifier
-- `poll-duration-ms` - Optional polling timeout (default: 1000ms)
+- `-c <config-file>` - Consumer properties file
+- `-g <group-id>` - Consumer group identifier
+- `-t <topic-name>` - Kafka topic to subscribe to
+
+### Demo Client Debugging
+
+Enable debug logging by adding JVM arguments:
+
+```bash
+java -Dlog4j.configurationFile=log4j2.xml \
+     -Dlog4j2.logger.com.solace.kafka.kafkaproxy.demo.level=DEBUG \
+     -jar demo-producer/target/kafka-demo-producer-*.jar \
+     --config demo-producer.properties \
+     --topic PRODUCE_TO:test-topic \
+     --num-records 10
+```
 
 ## Troubleshooting
 
@@ -334,20 +364,6 @@ openssl s_client -connect localhost:9094 -servername localhost
 
 # Verify certificate in keystore
 keytool -list -v -keystore /path/to/keystore.pkcs12 -storetype PKCS12
-```
-
-### Demo Client Debugging
-
-Enable debug logging by adding JVM arguments:
-
-```bash
-java -Dlogback.configurationFile=logback.xml \
-     -Dcom.solace.kafka.kafkaproxy.demo.level=DEBUG \
-     -cp target/kafka-wireline-proxy-*-jar-with-dependencies.jar \
-     com.solace.kafka.kafkaproxy.demo.DemoProducer \
-     demo-producer.properties \
-     test-topic \
-     10
 ```
 
 ## Monitoring
