@@ -129,7 +129,7 @@ Open another terminal and start the demo producer:
 # Run the demo producer from its own JAR
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
-     --topic PRODUCE_TO:test-topic \
+     --topic PRODUCER_TOPIC:test-topic \
      --input-file getting-started/test-data/publish-data-kv-10-fixed.txt \
      --num-records 10 \
      --delay 5
@@ -137,7 +137,7 @@ java -jar demo-producer/target/kafka-demo-producer-*.jar \
 
 **Command Arguments:**
 - `--config demo-producer.properties` - Producer configuration file
-- `--topic PRODUCE_TO:test-topic` - Kafka topic to publish to (note the PRODUCE_TO prefix)
+- `--topic PRODUCER_TOPIC:test-topic` - Kafka topic to publish to (note the PRODUCER_TOPIC prefix)
 - `--input-file getting-started/test-data/publish-data-kv-10-fixed.txt` - Test Data File containing records with 10 unique Keys
 - `--num-records 10` - Number of messages to send
 - `--delay 5` - Delay in milliseconds between requests to publish messages (can be 0)
@@ -198,7 +198,7 @@ java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
 # Producer with SSL
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
-     --topic PRODUCE_TO:ssl-test-topic \
+     --topic PRODUCER_TOPIC:ssl-test-topic \
      --num-records 5
 ```
 
@@ -250,7 +250,7 @@ Test topic name conversion (if `proxy.separators` is configured):
 # This topic name will be converted: my_test.topic -> my/test/topic
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
-     --topic PRODUCE_TO:my_test.topic \
+     --topic PRODUCER_TOPIC:my_test.topic \
      --num-records 5
 ```
 
@@ -262,7 +262,7 @@ Generate more messages for throughput testing:
 # Send 1000 messages
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
-     --topic PRODUCE_TO:perf-test-topic \
+     --topic PRODUCER_TOPIC:perf-test-topic \
      --num-records 1000
 ```
 
@@ -274,7 +274,7 @@ Use custom test data from files:
 # Producer with custom input file
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
-     --topic PRODUCE_TO:file-test-topic \
+     --topic PRODUCER_TOPIC:file-test-topic \
      --input-file /path/to/test-data/messages.txt \
      --num-records 50
 ```
@@ -287,7 +287,7 @@ Add delays between messages for controlled testing:
 # Producer with 100ms delay between messages
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
-     --topic PRODUCE_TO:delayed-topic \
+     --topic PRODUCER_TOPIC:delayed-topic \
      --num-records 10 \
      -d 100
 ```
@@ -300,13 +300,13 @@ Run multiple producers simultaneously:
 # Terminal 1
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
-     --topic PRODUCE_TO:batch-topic \
+     --topic PRODUCER_TOPIC:batch-topic \
      --num-records 50 &
 
 # Terminal 2
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
-     --topic PRODUCE_TO:batch-topic \
+     --topic PRODUCER_TOPIC:batch-topic \
      --num-records 50 &
 ```
 
@@ -317,7 +317,7 @@ java -jar demo-producer/target/kafka-demo-producer-*.jar \
 ```bash
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config <config-file> \
-     --topic PRODUCE_TO:<topic-name> \
+     --topic PRODUCER_TOPIC:<topic-name> \
      --num-records <message-count> \
      [--input-file <input-file>] \
      [-d <delay-millis>]
@@ -325,7 +325,7 @@ java -jar demo-producer/target/kafka-demo-producer-*.jar \
 
 **Parameters:**
 - `-c | --config      <config-file>` - Producer properties file
-- `-t | --topic       PRODUCE_TO:<topic-name>` - Target Kafka topic (PRODUCE_TO prefix required)
+- `-t | --topic       PRODUCER_TOPIC:<topic-name>` - Target Kafka topic (PRODUCER_TOPIC prefix required)
 - `-n | --num-records <message-count>` - Number of messages to send
 - `-i | --input-file  <input-file>` - Optional: Custom input file for message content
 - `-d | --delay       <delay-millis>` - Optional: Delay between messages in milliseconds
@@ -353,7 +353,7 @@ java -Dlog4j.configurationFile=log4j2.xml \
      -Dlog4j2.logger.com.solace.kafka.kafkaproxy.demo.level=DEBUG \
      -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
-     --topic PRODUCE_TO:test-topic \
+     --topic PRODUCER_TOPIC:test-topic \
      --num-records 10
 ```
 

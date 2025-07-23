@@ -126,7 +126,7 @@ echo "Testing plaintext connection..."
 nc -zv $BOOTSTRAP_LB 9092
 
 # Test with Kafka client (replace with your test topic)
-# kafka-console-producer.sh --bootstrap-server $BOOTSTRAP_LB:9094 --topic PRODUCE_TO:test-topic --producer.config ssl.properties
+# kafka-console-producer.sh --bootstrap-server $BOOTSTRAP_LB:9094 --topic PRODUCER_TOPIC:test-topic --producer.config ssl.properties
 ```
 
 ## Troubleshooting

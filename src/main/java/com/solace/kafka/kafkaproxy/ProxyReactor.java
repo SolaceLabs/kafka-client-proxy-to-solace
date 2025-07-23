@@ -85,6 +85,11 @@ public class ProxyReactor extends Thread {
         private final Set<ProxyChannel> channels;  // channels accepted on this listen port
         private final MetadataResponseData.MetadataResponseBrokerCollection brokers = new MetadataResponseData.MetadataResponseBrokerCollection();
         private final SslFactory sslFactory;
+
+        public boolean isTlsPort() {
+            return listenEntry.getSecurityProtocol() == SecurityProtocol.SSL ||
+                   listenEntry.getSecurityProtocol() == SecurityProtocol.SASL_SSL;
+        }
         
         // taken from org.apache.kafka.common.network.ChannelBuilders.channelBuilderConfigs()
         @SuppressWarnings("unchecked")

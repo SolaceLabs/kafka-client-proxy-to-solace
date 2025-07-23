@@ -129,7 +129,7 @@ ls demo-consumer/target/kafka-demo-consumer-*.jar
 # Run demo producer (from separate JAR)
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config getting-started/sample-configs/demo-producer.properties \
-     --topic PRODUCE_TO:test-topic \
+     --topic PRODUCER_TOPIC:test-topic \
      --num-records 10
 
 # Run demo consumer (from separate JAR)

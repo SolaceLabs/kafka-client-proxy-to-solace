@@ -110,6 +110,10 @@ public class ProxyChannel {
 	private static int channelIdGenerator = 0;
 	private int channelId = channelIdGenerator++;
 
+	private final boolean isTlsPort;
+    private boolean tlsValidated = false;
+    private ByteBuffer validationBuffer;
+
 	final static class ProduceAckState extends ProxyReactor.WorkEntry {
 		private final String topic;
 		private final ProduceResponseData.TopicProduceResponseCollection topicProduceResponseCollection;
@@ -336,12 +340,20 @@ public class ProxyChannel {
 			throws IOException {
 		this.transportLayer = transportLayer;
 		this.listenPort = listenPort;
+		this.isTlsPort = listenPort.isTlsPort();
 		size = ByteBuffer.allocate(4);
 		enableKafkaSaslAuthenticateHeaders = false;
 		produceResponseProcesssing = new ProxyChannel.ProduceResponseProcessing();
 		listenPort.addChannel(this);
 		maxProduceMessageBytes = ProxyConfig.getInstance().getInt(ProxyConfig.PRODUCE_MESSAGE_MAX_BYTES);
 		sendQueue = new LinkedList<Send>();
+
+        this.validationBuffer = ByteBuffer.allocate(16);
+        if (isTlsPort) {
+            this.tlsValidated = false;
+        } else {
+            this.tlsValidated = true; // No validation needed for non-TLS
+        }
 	}
 
 	String getHostName() {
@@ -1073,14 +1085,39 @@ public class ProxyChannel {
     // We also exit if we are told to wait (e.g. authentication request), but later we will be 
     // forced back into this routine even without a read event when we are ready to proceed further.
 	void readFromChannel() {
-        boolean gotMessage = false;
+
+		boolean gotMessage = false;
 		try {
+			if (isTlsPort && !tlsValidated) {
+				try {
+					if (!performTLSValidation()) {
+						close("Invalid TLS connection on TLS port");
+						return;
+					}
+					tlsValidated = true;
+				} catch (IOException e) {
+					log.warn("TLS validation failed from {}: {}", 
+						transportLayer.socketChannel().socket().getRemoteSocketAddress(), 
+						e.getMessage());
+					close("TLS validation error: " + e.getMessage());
+					return;
+				}
+			}
+			
 			while (transportLayer.hasBytesBuffered() ||
                    (!gotMessage && transportLayer.selectionKey().isReadable())) {
-				if (!transportLayer.ready()) {
-					transportLayer.handshake();
-					if (!transportLayer.ready())
-						return;
+				try {
+					if (!transportLayer.ready()) {
+						transportLayer.handshake();
+						if (!transportLayer.ready())
+							return;
+					}
+				} catch (IOException e) {
+					log.debug("SSL handshake failed from {}: {}", 
+						transportLayer.socketChannel().socket().getRemoteSocketAddress(), 
+						e.getMessage());
+					close("SSL handshake error: " + e.getMessage());
+					return;
 				}
 				if (size.hasRemaining()) {
 					int bytesRead = transportLayer.read(size);
@@ -1299,5 +1336,54 @@ public class ProxyChannel {
                 transportLayer.addInterestOps(SelectionKey.OP_READ);
             }
         }
+	}
+	
+	// New method for TLS validation
+private boolean performTLSValidation() throws IOException {
+    try {
+        // Read first bytes into validation buffer
+        int bytesRead = transportLayer.read(validationBuffer);
+        
+        if (bytesRead <= 0) {
+            return true; // No data yet, wait for more
+        }
+        
+        if (bytesRead < 0) {
+            throw new IOException("Connection closed during TLS validation");
+        }
+        
+        validationBuffer.flip();
+        
+        // Check for TLS handshake
+        if (validationBuffer.remaining() >= 5) {
+            byte contentType = validationBuffer.get(0);
+            byte majorVersion = validationBuffer.get(1);
+            byte minorVersion = validationBuffer.get(2);
+            
+            // TLS record types: 20-24 (0x14-0x18)
+            // Version: 3.x (0x03, 0x01+)
+            boolean validTLS = (contentType >= 0x14 && contentType <= 0x18) && 
+                              (majorVersion == 0x03 && minorVersion >= 0x01);
+            
+            if (!validTLS) {
+                log.warn("Non-TLS connection detected on TLS port from {} - contentType: 0x{}, version: {}.{}", 
+                    transportLayer.socketChannel().socket().getRemoteSocketAddress(),
+                    String.format("%02X", contentType), majorVersion, minorVersion);
+                return false;
+            }
+            
+            // Validation passed - prepare buffer for normal SSL processing
+            validationBuffer.rewind();
+        }
+        
+        return true;
+        
+		} catch (IOException e) {
+			// Re-throw IOException for caller to handle
+			throw new IOException("TLS validation failed: " + e.getMessage(), e);
+		} catch (Exception e) {
+			// Convert other exceptions to IOException
+			throw new IOException("Unexpected error during TLS validation: " + e.getMessage(), e);
+		}
 	}
 }
