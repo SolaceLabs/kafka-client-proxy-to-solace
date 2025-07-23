@@ -532,3 +532,314 @@ For issues and questions:
 - **GitHub Issues**: Use for bug reports and feature requests
 - **Solace Community**: https://solace.community/
 - **Documentation**: https://docs.solace.com/
+
+## Usage
+
+This section describes how Kafka client applications connect to the proxy and how messages flow between Kafka clients and Solace PubSub+ brokers.
+
+### Kafka Client Connection
+
+Kafka clients connect to the proxy exactly as they would connect to a native Kafka broker, using the standard Kafka client libraries and configuration.
+
+#### Producer Connection Example
+
+```java
+Properties props = new Properties();
+props.put("bootstrap.servers", "proxy-host:9092");  // or proxy-host:9094 for SSL
+props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+
+// For SSL connections
+props.put("security.protocol", "SASL_SSL");
+props.put("sasl.mechanism", "PLAIN");
+props.put("sasl.jaas.config", "org.apache.kafka.common.security.plain.PlainLoginModule required " +
+    "username=\"solace-username\" password=\"solace-password\";");
+
+KafkaProducer<String, String> producer = new KafkaProducer<>(props);
+producer.send(new ProducerRecord<>("my-topic", "key", "Hello Solace!"));
+```
+
+#### Consumer Connection Example
+
+```java
+Properties props = new Properties();
+props.put("bootstrap.servers", "proxy-host:9092");
+props.put("group.id", "my-consumer-group");
+props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("auto.offset.reset", "earliest");
+
+// For SSL connections (same as producer)
+props.put("security.protocol", "SASL_SSL");
+props.put("sasl.mechanism", "PLAIN");
+props.put("sasl.jaas.config", "org.apache.kafka.common.security.plain.PlainLoginModule required " +
+    "username=\"solace-username\" password=\"solace-password\";");
+
+KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+consumer.subscribe(Collections.singletonList("my-topic"));
+
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.println("Received: " + record.value());
+    }
+}
+```
+
+### Publishing to Solace Topics
+
+When Kafka producers publish messages, the proxy translates Kafka topics to Solace topics with optional hierarchical conversion.
+
+#### Topic Name Conversion
+
+The `proxy.separators` property controls how Kafka topic names are converted to hierarchical Solace topics:
+
+**Without Separators (Default)**
+```properties
+# Configuration
+proxy.separators=
+
+# Kafka topic → Solace topic
+orders → orders
+user.events → user.events
+my_topic_name → my_topic_name
+```
+
+**With Separators**
+```properties
+# Configuration
+proxy.separators=._
+
+# Kafka topic → Solace topic
+orders → orders
+user.events → user/events
+my_topic_name → my/topic/name
+inventory.updates.retail → inventory/updates/retail
+```
+
+#### Publishing Examples
+
+```java
+// Kafka producer code
+producer.send(new ProducerRecord<>("inventory.updates.retail", "product123", orderData));
+
+// With proxy.separators=._ this becomes:
+// - Solace topic: inventory/updates/retail
+// - Message published to hierarchical topic structure
+// - Solace consumers can subscribe to:
+//   - inventory/updates/retail (exact match)
+//   - inventory/updates/> (wildcard - all retail updates)  
+//   - inventory/> (wildcard - all inventory topics)
+```
+
+#### Message Headers and Properties
+
+Kafka message headers are preserved and passed through to Solace as user properties:
+
+```java
+// Kafka producer with headers
+ProducerRecord<String, String> record = new ProducerRecord<>("orders", "order123", orderJson);
+record.headers().add("source", "web-api".getBytes());
+record.headers().add("priority", "high".getBytes());
+producer.send(record);
+
+// Solace message receives these as user properties:
+// - source: "web-api"
+// - priority: "high"
+```
+
+### Consuming from Solace Queues
+
+Kafka consumers connect to consumer groups, which the proxy maps to Solace queues. The queue naming strategy determines how messages are routed.
+
+#### Queue Naming Strategy
+
+Queue names are formulated using this pattern:
+```
+[qualifier]/[topic]/[consumer-group]
+```
+
+Where:
+- **qualifier**: Value of `proxy.queuename.qualifier` property (optional prefix)
+- **topic**: Kafka topic name (with separator conversion if configured)
+- **consumer-group**: Kafka consumer group ID
+
+#### Queue Name Examples
+
+**Basic Queue Naming**
+```properties
+# Configuration
+proxy.queuename.qualifier=KAFKA-PROXY
+proxy.separators=._
+
+# Consumer connection:
+# - Topic: user.profile.updates
+# - Consumer Group: profile-service
+# 
+# Resulting Solace queue: KAFKA-PROXY/user/profile/updates/profile-service
+```
+
+**Without Qualifier**
+```properties
+# Configuration  
+proxy.queuename.qualifier=
+proxy.separators=.
+
+# Consumer connection:
+# - Topic: inventory.alerts
+# - Consumer Group: warehouse-app
+#
+# Resulting Solace queue: inventory/alerts/warehouse-app
+```
+
+**Topic-Only Queue Naming**
+```properties
+# Configuration
+proxy.queuename.is.topicname=true
+proxy.separators=._
+
+# Consumer connection:
+# - Topic: system.notifications  
+# - Consumer Group: email-service (ignored)
+#
+# Resulting Solace queue: system/notifications
+# Note: All consumer groups for this topic share the same queue
+```
+
+#### Consumer Group Behavior
+
+**Multiple Consumers in Same Group**
+```java
+// Consumer 1
+props.put("group.id", "order-processors");
+consumer1.subscribe(Collections.singletonList("orders"));
+
+// Consumer 2  
+props.put("group.id", "order-processors");
+consumer2.subscribe(Collections.singletonList("orders"));
+
+// Both consumers share the same Solace queue: KAFKA-PROXY/orders/order-processors  
+// Messages are load-balanced between them (competing consumers)
+```
+
+**Different Consumer Groups**
+```java
+// Group A
+props.put("group.id", "audit-service");
+consumerA.subscribe(Collections.singletonList("orders"));
+
+// Group B
+props.put("group.id", "analytics-service"); 
+consumerB.subscribe(Collections.singletonList("orders"));
+
+// Creates separate Solace queues:
+// - KAFKA-PROXY/orders/audit-service
+// - KAFKA-PROXY/orders/analytics-service
+// Both groups receive all messages (broadcast pattern)
+```
+
+### Message Flow Patterns
+
+#### Publish-Subscribe Pattern
+
+```java
+// Publisher
+producer.send(new ProducerRecord<>("notifications.email", emailData));
+
+// Multiple subscribers in different groups
+// Group 1: Email delivery service  
+consumer1.subscribe(Collections.singletonList("notifications.email"));
+
+// Group 2: Email analytics service
+consumer2.subscribe(Collections.singletonList("notifications.email"));
+
+// Result: Both groups receive all email notifications
+```
+
+#### Load Balancing Pattern
+
+```java
+// Multiple consumers in same group for load balancing
+props.put("group.id", "order-processing-workers");
+
+// Worker 1
+consumer1.subscribe(Collections.singletonList("orders"));
+
+// Worker 2  
+consumer2.subscribe(Collections.singletonList("orders"));
+
+// Worker 3
+consumer3.subscribe(Collections.singletonList("orders"));
+
+// Result: Orders are distributed across the 3 workers
+```
+
+#### Hierarchical Topic Publishing
+
+```properties
+# Configuration enables hierarchical topics
+proxy.separators=.
+```
+
+```java
+// Kafka publishers
+producer.send(new ProducerRecord<>("events.user.login", loginEvent));
+producer.send(new ProducerRecord<>("events.user.logout", logoutEvent)); 
+producer.send(new ProducerRecord<>("events.system.startup", startupEvent));
+
+// Solace topics created:
+// - events/user/login
+// - events/user/logout  
+// - events/system/startup
+
+// Solace consumers can subscribe with wildcards:
+// - events/user/>     (all user events)
+// - events/>          (all events)
+// - events/*/login    (login events from any category)
+```
+
+### Authentication Flow
+
+The proxy transparently forwards Kafka SASL credentials to the Solace broker:
+
+1. **Kafka Client** authenticates with proxy using SASL_PLAIN or SASL_SSL
+2. **Proxy** extracts username/password from Kafka SASL
+3. **Proxy** connects to Solace broker using those credentials
+4. **Solace Broker** authenticates and authorizes the user
+
+```java
+// Kafka client configuration
+props.put("sasl.jaas.config", 
+    "org.apache.kafka.common.security.plain.PlainLoginModule required " +
+    "username=\"my-solace-user\" password=\"my-solace-password\";");
+
+// These credentials are passed through to Solace broker
+// User permissions on Solace determine access to topics/queues
+```
+
+### Consumer Scaling Considerations
+
+The `proxy.partitions.per.topic` setting affects consumer scaling:
+
+```properties
+# Allow up to 20 consumers per topic across all consumer groups
+proxy.partitions.per.topic=20
+```
+
+- Each Kafka topic appears to have the specified number of partitions
+- Enables parallel consumption by multiple consumers
+- Higher values support more concurrent consumers
+- No performance penalty for higher values
+
+### Error Handling
+
+#### Connection Failures
+- **Kafka Client ↔ Proxy**: Standard Kafka client retry mechanisms apply
+- **Proxy ↔ Solace**: Automatic reconnection with configurable retries
+
+#### Message Delivery
+- **At-least-once delivery**: Messages may be delivered multiple times
+- **No transactions**: Kafka transaction semantics not supported
+- **Consumer commits**: Mapped to Solace message acknowledgments
+
+This usage model allows existing Kafka applications to seamlessly publish and consume messages through Solace PubSub+ without any code changes, while taking advantage of Solace's hierarchical topics and flexible routing capabilities.

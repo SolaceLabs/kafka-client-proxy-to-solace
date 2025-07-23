@@ -44,3 +44,4 @@ bin/
 getting-started/configs
 
 k8s/__dev-*/**
+materials/

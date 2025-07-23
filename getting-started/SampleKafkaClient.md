@@ -15,7 +15,14 @@ The demo clients are in separate sub-projects with their own directories. Build 
 
 ```bash
 # From the project root directory
+# Build Proxy
 mvn clean package
+
+# Sample Kafka producer
+mvn clean package -f demo-producer/pom.xml
+
+# Sample Kafka consumer
+mvn clean package -f demo-consumer/pom.xml
 
 # This creates separate JAR files:
 # - Main proxy JAR
@@ -27,6 +34,7 @@ ls demo-consumer/target/kafka-demo-consumer-*.jar
 ```
 
 > **Note**: The version number in the JAR file of ***Kafka Demo Clients*** name reflects the version of the Kafka client library that was used to compile it. For example, `kafka-demo-producer-3.9.1.jar` indicates it was compiled with Kafka client version 3.9.1.
+>> You can change the version of `kafka-clients` module in the `pom.xml` file to create different versions of the clients for testing.
 
 ## Configuration Files
 
@@ -78,12 +86,15 @@ java -jar target/kafka-wireline-proxy-*.jar \
 ```
 
 The proxy should display:
+```log
+15:50:28.636 [main] INFO  HealthCheckServer - Health check server started on port 8080
+15:50:28.638 [main] INFO  ProxyMain - Health check server started on port 8080
+15:50:28.652 [main] INFO  ProxyReactor - Listening for incoming connections on PLAINTEXT localhost/127.0.0.1:9092
+15:50:28.653 [main] INFO  ProxyReactor - Listening for incoming connections on SASL_SSL localhost/127.0.0.1:9094
+15:50:28.791 [main] INFO  ProxyReactor - Initializing request handler thread pool with 32 threads.
 ```
-INFO: Kafka Proxy started successfully
-INFO: Listening on PLAINTEXT://localhost:9092
-INFO: Listening on SASL_SSL://localhost:9094
-INFO: Health check server started on port 8080
-```
+
+> **Note:** HealthCheckServer logs will be included if property `proxy.healthcheckserver.create=true`.
 
 ### Start Demo Consumer
 
@@ -119,23 +130,29 @@ Open another terminal and start the demo producer:
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
      --config demo-producer.properties \
      --topic PRODUCE_TO:test-topic \
-     --num-records 10
+     --input-file getting-started/test-data/publish-data-kv-10-fixed.txt \
+     --num-records 10 \
+     --delay 5
 ```
 
 **Command Arguments:**
 - `--config demo-producer.properties` - Producer configuration file
 - `--topic PRODUCE_TO:test-topic` - Kafka topic to publish to (note the PRODUCE_TO prefix)
+- `--input-file getting-started/test-data/publish-data-kv-10-fixed.txt` - Test Data File containing records with 10 unique Keys
 - `--num-records 10` - Number of messages to send
+- `--delay 5` - Delay in milliseconds between requests to publish messages (can be 0)
 
 **Expected Output:**
-```
-Demo Producer starting...
-Sending 10 messages to topic: test-topic
-Message 1 sent: Hello from Demo Producer - Message 1
-Message 2 sent: Hello from Demo Producer - Message 2
+```log
 ...
-Message 10 sent: Hello from Demo Producer - Message 10
-Producer completed successfully
+INFO  - Starting to send messages to topic 'PRODUCER_TOPIC:ORDER_CHANGES'. Press Ctrl+C to exit.
+...
+INFO  - SENT 0000000000 : The old house on the hill seemed to whisper secrets to the passing travelers
+INFO  - SENT 1111111111 : A gentle breeze rustled through the tall grass creating a soothing melody
+INFO  - SENT 2222222222 : Ancient forest stood as a silent guardian watching over the sleeping valley
+...
+INFO  - SENT 8888888888 : Train rumbled along the tracks carrying passengers to their unknown destinations
+INFO  - SENT 9999999999 : The chef prepared a delicious meal the aroma filling the entire restaurant
 ```
 
 ### Verify Message Delivery
@@ -148,6 +165,8 @@ Received message: Hello from Demo Producer - Message 2
 ...
 Received message: Hello from Demo Producer - Message 10
 ```
+
+> **Note:** `Control-C` to close out of the consumer; Producer will terminate when the number of messages specified has been sent.
 
 ## SSL/TLS Testing
 
@@ -305,11 +324,11 @@ java -jar demo-producer/target/kafka-demo-producer-*.jar \
 ```
 
 **Parameters:**
-- `--config <config-file>` - Producer properties file
-- `--topic PRODUCE_TO:<topic-name>` - Target Kafka topic (PRODUCE_TO prefix required)
-- `--num-records <message-count>` - Number of messages to send
-- `--input-file <input-file>` - Optional: Custom input file for message content
-- `-d <delay-millis>` - Optional: Delay between messages in milliseconds
+- `-c | --config      <config-file>` - Producer properties file
+- `-t | --topic       PRODUCE_TO:<topic-name>` - Target Kafka topic (PRODUCE_TO prefix required)
+- `-n | --num-records <message-count>` - Number of messages to send
+- `-i | --input-file  <input-file>` - Optional: Custom input file for message content
+- `-d | --delay       <delay-millis>` - Optional: Delay between messages in milliseconds
 
 ### DemoConsumer Usage
 
