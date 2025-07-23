@@ -128,11 +128,11 @@ spec:
               readOnly: true
           resources:
             limits:
-              memory: "1280Mi"
+              memory: "1536Mi"
               cpu: "1"
             requests:
-              memory: "512Mi"
-              cpu: "500m"
+              memory: "1536Mi"
+              cpu: "1"
       volumes:
         - name: kafka-keystore-volume
           secret:

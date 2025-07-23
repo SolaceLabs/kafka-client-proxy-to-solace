@@ -27,7 +27,7 @@ ENV JAVA_OPTS=""
 
 # Command to run your application
 #ENTRYPOINT ["java", "-jar", "app.jar"]
-ENTRYPOINT java $JAVA_OPTS -jar app.jar proxy.properties
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar proxy.properties"]
 
 # Let's run as non-root user: kproxy
 RUN groupadd --system kproxy && useradd --system --gid kproxy kproxy
