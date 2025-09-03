@@ -224,13 +224,13 @@ The Kafka Proxy takes one command line argument: a properties file to configure 
 | `ssl.keystore.location` | Path to the keystore file containing the server's SSL certificate (PKCS12 or JKS format) | | ✅ (for SSL) |
 | `ssl.keystore.password` | Password for the keystore file. Supports environment variable resolution: `${env:KAFKA_KEYSTORE_PASSWORD}` | | ✅ (for SSL) |
 | `ssl.keystore.type` | Format of the keystore file. Valid values: `JKS`, `PKCS12` | `JKS` | |
-| `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. **Note: Use TLSv1.2 for compatibility with Solace Event Brokers.** Example: `TLSv1.2` or `TLSv1.2,TLSv1.1` | `TLSv1.2` | |
+| `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. **Note: Use TLSv1.2 for compatibility with the Solace Event Broker.** Example: `TLSv1.2` or `TLSv1.2,TLSv1.1` | `TLSv1.2` | |
 | `ssl.cipher.suites` | Comma-separated list of SSL cipher suites to enable | JVM defaults | |
 | `ssl.protocol` | SSL protocol to use. Valid values: `TLS`, `TLSv1.1`, `TLSv1.2`, `TLSv1.3` | `TLS` | |
 
 **Recommended SSL Configuration:**
 ```properties
-# Recommended for compatibility with Solace Event Brokers
+# Recommended for compatibility with the Solace Event Broker
 ssl.enabled.protocols=TLSv1.2
 
 # For broader client compatibility (if needed)
@@ -251,7 +251,7 @@ These properties enable client certificate verification for enhanced security:
 | `ssl.truststore.password` | Password for the truststore file | | ✅ (for mTLS) |
 | `ssl.truststore.type` | Format of the truststore file. Valid values: `JKS`, `PKCS12` | `JKS` | |
 
-### Solace Broker Connection Settings
+### Solace Event Broker Connection Settings
 
 All Solace connection properties use the `solace.` prefix to prevent conflicts with Kafka properties.
 
