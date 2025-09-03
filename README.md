@@ -1,10 +1,10 @@
-# Kafka Proxy for Solace Event brokers
+# Kafka Proxy for Solace
 
 A high-performance proxy that allows Kafka clients to publish and subscribe to a Solace event broker without any changes to the Kafka client application.
 
 ## Description
 
-This project enables Kafka client applications to seamlessly produce and consume messages from the Solace event mesh via the proxy. The proxy speaks the native Kafka wireline protocol to Kafka client applications and the Solace SMF protocol to the Solace Event Broker.
+This project enables Kafka client applications to seamlessly produce and consume messages from Solace via the proxy. The proxy speaks the native Kafka wireline protocol to Kafka client applications and the Solace SMF protocol to the Event Brokers.
 
 **Key Features:**
 - **Protocol Translation**: Transparent conversion between Kafka wireline protocol and Solace SMF
@@ -842,4 +842,4 @@ proxy.partitions.per.topic=20
 - **No transactions**: Kafka transaction semantics not supported
 - **Consumer commits**: Mapped to Solace message acknowledgments
 
-This usage model allows existing Kafka applications to seamlessly publish and consume messages through the Solace broker without any code changes, while taking advantage of Solace's hierarchical topics and flexible routing capabilities.
+This usage model allows existing Kafka applications to seamlessly publish and consume messages through Solace without any code changes, while taking advantage of Solace's hierarchical topics and flexible routing capabilities.

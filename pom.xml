@@ -7,9 +7,9 @@
   <version>0.1.1</version>
   <packaging>jar</packaging>
 
-  <name>Kafka Wireline Proxy</name>
+  <name>Kafka Wireline Proxy for Solace</name>
   <description>
-    Kafka Wireline Proxy for Solace Platform
+    Kafka Wireline Proxy for Solace
     This project defines a deployable proxy that enables Kafka producers 
     and consumers to publish to Solace topics and subscribe to Solace queues.
   </description>

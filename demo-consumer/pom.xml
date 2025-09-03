@@ -12,7 +12,7 @@
     <name>Kafka Demo Consumer</name>
     <description>
         Demo Kafka consumer application to test with the 
-        Kafka Wireline Proxy for Solace PubSub+
+        Kafka Wireline Proxy for Solace
     </description>
 
     <properties>

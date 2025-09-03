@@ -11,7 +11,7 @@
     <name>Kafka Demo Producer</name>
     <description>
         Demo Kafka producer application to test with the 
-        Kafka Wireline Proxy for Solace PubSub+
+        Kafka Wireline Proxy for Solace
     </description>
 
     <properties>
