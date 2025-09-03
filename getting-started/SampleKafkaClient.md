@@ -1,6 +1,6 @@
 # Sample Kafka Client Demo
 
-This guide demonstrates how to build and execute the embedded demo producer and consumer clients to test the Kafka Proxy for Solace PubSub+.
+This guide demonstrates how to build and execute the embedded demo producer and consumer clients to test the Kafka Proxy for Solace.
 
 ## Prerequisites
 
