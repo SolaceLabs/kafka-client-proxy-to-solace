@@ -180,7 +180,7 @@ Ensure you have the following files in the aws-deploy directory:
 ## Notes
 
 - Load balancers may take 2-3 minutes to provision
-- SSL ports (9094, 30094, 30194) are open to internet
-- Plaintext ports (9092, 30092, 30192) are restricted to VPC
+- SSL port (9094) are open to internet
+- Plaintext port (9092) are restricted to VPC
 - Health check port (8080) is available for load balancer health checks
 - Each pod gets its own instance-specific load balancer for direct access
