@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-proxy-config
+  namespace: kafka-proxy
+  # AKS-specific: Add labels for better organization
+  labels:
+    app: kafka-wireline-proxy
+    config-type: application
+data:
+  proxy.properties: |
+    ## LOGGING CONFIGURATION
+    ##########################
+    # Proxy log level (TRACE, DEBUG, INFO, WARN, ERROR)
+    proxy.log.level=${env:PROXY_LOG_LEVEL:DEBUG}
+    
+    # Root log level (affects all logging)
+    proxy.log.level.root=${env:PROXY_LOG_LEVEL_ROOT:DEBUG}
+
+    ## KAFKA SETTINGS
+    ##########################
+
+    listeners=${env:KAFKA_LISTENERS:PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094}
+
+    # advertised.listeners (OPTIONAL):
+    # For cloud providers, this is usually the public IP address
+    # This is often required if running in a container as well
+    # Number of entries must = number of listeners
+    # advertised.listeners: PLAINTEXT://${K8S_INTERNAL_HOSTNAME}:9092,SASL_SSL://${K8S_INTERNAL_HOSTNAME}:9094,SASL_SSL://${K8S_EXTERNAL_HOSTNAME}:9094
+    advertised.listeners: PLAINTEXT://${K8S_INTERNAL_HOSTNAME}:9092,SASL_SSL://${K8S_EXTERNAL_HOSTNAME}:9094
+
+    # ssl.keystore.location: ${env:KAFKA_KEYSTORE_LOCATION:keystore}
+    ssl.keystore.location: /app/keystore
+    ssl.keystore.password: ${env:KAFKA_KEYSTORE_PASSWORD:password}
+    # Use if key password is the same as keystore password:
+    ssl.key.password=${env:KAFKA_KEYSTORE_PASSWORD:password}}
+    # Use for different key password:
+    # ssl.key.password=${env:KAFKA_KEY_PASSWORD:password}}
+
+    # ssl.keystore.type: ${env:KAFKA_KEYSTORE_TYPE:PKCS12}
+    ssl.keystore.type: PKCS12
+
+    ssl.protocol: TLSv1.2
+    ssl.enabled.protocols: TLSv1.2
+    # ssl.enabled.protocols: TLSv1.2,TLSv1.3
+    # ssl.enabled.protocols: TLSv1.3
+    ssl.protocol: TLS
+    # ssl.cipher.suites: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+
+    # Set to "none" to disable client authentication; Set to "required" to enforce client certs
+    ssl.client.auth=none
+
+    # ssl.truststore.location: path/to/truststore/trusted.jks
+    # ssl.truststore.password: trusted
+    # ssl.truststore.type: JKS
+    # ssl.endpoint.identification.algorithm: 
+
+    ## SOLACE SETTINGS
+    ##########################
+    # solace.host:     ${env:SOLACE_HOST:tcps://localhost:55443}
+    # solace.vpn_name: ${env:SOLACE_VPN_NAME:default}
+    solace.host:     tcps://mr-connection-2d92bwbumsi.messaging.solace.cloud:55443
+    solace.vpn_name: kafka-wireline
+    solace.ssl.enabled.protocols: TLSv1.2
+
+    # solace.ssl.truststore.location: path/to/truststore/trusted.jks
+    # solace.ssl.truststore.password: trusted
+    # solace.ssl.truststore.type: JKS
+    # solace.ssl.endpoint.identification.algorithm: 
+
+    ## PROXY-WIDE SETTINGS
+    ##########################
+    proxy.healthcheckserver.create: true
+    proxy.healthcheckserver.port: 8080
+
+    ## PRODUCER SETTINGS
+    ##########################
+    proxy.separators: _.
+    message.max.bytes: 1048576
+
+    ## CONSUMER SETTINGS
+    ##########################
+    proxy.request.handler.threads: 32
+    proxy.partitions.per.topic: 50
+    proxy.queuename.qualifier: KAFKA-PROXY-QUEUE
+    proxy.queuename.is.topicname: false
+    proxy.fetch.compression.type: none
+    proxy.max.uncommitted.messages: 1000

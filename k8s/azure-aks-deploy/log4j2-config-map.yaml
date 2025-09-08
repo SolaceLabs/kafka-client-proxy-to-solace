@@ -1,0 +1,32 @@
+---
+## Optional Log4j2 Configuration
+## Add option -Dlog4j.configurationFile=/app/log4j2.xml option to JAVA_OPTS
+## In proxy statefulset
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: log4j2-config
+  namespace: kafka-proxy
+  # AKS-specific: Add labels for better organization
+  labels:
+    app: kafka-wireline-proxy
+    config-type: application
+data:
+  log4j2.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <Configuration status="WARN">
+        <Appenders>
+            <Console name="Console" target="SYSTEM_OUT">
+                <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{1} - %msg%n"/>
+            </Console>
+            <!-- <File name="File" fileName="logs/application.log">
+                <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{1} - %msg%n"/>
+            </File> -->
+        </Appenders>
+        <Loggers>
+            <Root level="debug">
+                <AppenderRef ref="Console"/>
+                <!-- <AppenderRef ref="File"/> -->
+            </Root>
+        </Loggers>
+    </Configuration>
