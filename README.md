@@ -1,10 +1,10 @@
-# Kafka Proxy for Solace PubSub+
+# Kafka Proxy for Solace Event brokers
 
-A high-performance proxy that allows Kafka clients to publish and subscribe to a Solace PubSub+ event broker without any changes to the Kafka client application.
+A high-performance proxy that allows Kafka clients to publish and subscribe to a Solace event broker without any changes to the Kafka client application.
 
 ## Description
 
-This project enables Kafka client applications to seamlessly produce and consume messages from the Solace PubSub+ event mesh via the proxy. The proxy speaks the native Kafka wireline protocol to Kafka client applications and the Solace SMF protocol to the Solace PubSub+ Event Broker.
+This project enables Kafka client applications to seamlessly produce and consume messages from the Solace event mesh via the proxy. The proxy speaks the native Kafka wireline protocol to Kafka client applications and the Solace SMF protocol to the Solace Event Broker.
 
 **Key Features:**
 - **Protocol Translation**: Transparent conversion between Kafka wireline protocol and Solace SMF
@@ -13,7 +13,7 @@ This project enables Kafka client applications to seamlessly produce and consume
 - **Security**: Comprehensive SSL/TLS and mTLS support for both Kafka clients and Solace connections
 - **Kubernetes Ready**: Production-ready deployment configurations for AWS EKS
 
-For producers, Kafka topics can be published to the Solace PubSub+ Event Mesh unmodified, or converted to hierarchical Solace topics by splitting on specified characters.
+For producers, Kafka topics can be published to the Solace Event Mesh unmodified, or converted to hierarchical Solace topics by splitting on specified characters.
 
 For consumers, the proxy manages consumer groups and topic subscriptions, mapping them to Solace queues and topic subscriptions with configurable queue naming strategies.
 
@@ -228,13 +228,13 @@ The Kafka Proxy takes one command line argument: a properties file to configure 
 | `ssl.keystore.location` | Path to the keystore file containing the server's SSL certificate (PKCS12 or JKS format) | | ✅ (for SSL) |
 | `ssl.keystore.password` | Password for the keystore file. Supports environment variable resolution: `${env:KAFKA_KEYSTORE_PASSWORD}` | | ✅ (for SSL) |
 | `ssl.keystore.type` | Format of the keystore file. Valid values: `JKS`, `PKCS12` | `JKS` | |
-| `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. **Note: Use TLSv1.2 for compatibility with Solace PubSub+ brokers.** Example: `TLSv1.2` or `TLSv1.2,TLSv1.1` | `TLSv1.2` | |
+| `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. **Note: Use TLSv1.2 for compatibility with Solace brokers.** Example: `TLSv1.2` or `TLSv1.2,TLSv1.1` | `TLSv1.2` | |
 | `ssl.cipher.suites` | Comma-separated list of SSL cipher suites to enable | JVM defaults | |
 | `ssl.protocol` | SSL protocol to use. Valid values: `TLS`, `TLSv1.1`, `TLSv1.2`, `TLSv1.3` | `TLS` | |
 
 **Recommended SSL Configuration:**
 ```properties
-# Recommended for compatibility with Solace PubSub+ brokers
+# Recommended for compatibility with Solace brokers
 ssl.enabled.protocols=TLSv1.2
 
 # For broader client compatibility (if needed)
@@ -535,7 +535,7 @@ For issues and questions:
 
 ## Usage
 
-This section describes how Kafka client applications connect to the proxy and how messages flow between Kafka clients and Solace PubSub+ brokers.
+This section describes how Kafka client applications connect to the proxy and how messages flow between Kafka clients and Solace brokers.
 
 ### Kafka Client Connection
 
@@ -842,4 +842,4 @@ proxy.partitions.per.topic=20
 - **No transactions**: Kafka transaction semantics not supported
 - **Consumer commits**: Mapped to Solace message acknowledgments
 
-This usage model allows existing Kafka applications to seamlessly publish and consume messages through Solace PubSub+ without any code changes, while taking advantage of Solace's hierarchical topics and flexible routing capabilities.
+This usage model allows existing Kafka applications to seamlessly publish and consume messages through the Solace broker without any code changes, while taking advantage of Solace's hierarchical topics and flexible routing capabilities.
