@@ -607,7 +607,30 @@ public class KafkaApiConsumerTools {
             this.cachedLastPartitionMaxBytes = requestPartitionMaxBytes;
         } else {
             log.warn("Attempted to process Fetch request but no active subscription -- Consumer possibly shutting down");
-            return request.getErrorResponse(new UnknownServerException("No active subscription"));
+
+            // return createFetchResponseInvalidSessionId(request, requestHeader);
+
+            // return request.getErrorResponse(new UnknownServerException("No active subscription"));
+
+            // TODO - Determine if error codes should be different if sessionId eligible or not
+            // Also, determine if error code should be UNKNOWN_SERVER_ERROR or FETCH_SESSION_ID_NOT_FOUND or NONE
+            final FetchResponseData responseData = new FetchResponseData()
+                .setThrottleTimeMs(0)
+                // .setErrorCode(sessionEligible && sessionId > 0 ? Errors.FETCH_SESSION_ID_NOT_FOUND.code() : Errors.UNKNOWN_SERVER_ERROR.code())
+                .setErrorCode(Errors.NONE.code())
+                .setSessionId(sessionEligible ? sessionId : 0)
+                .setResponses(new ArrayList<>());
+
+            // TODO - finalize if sleep here is correct or if throttling is needed
+            // We don't want to return FETCH RESPONSE too quickly if there is no active subscription
+            try {
+                Thread.sleep(requestMaxWaitTimeMs == null || requestMaxWaitTimeMs < 1 ? this.defaultBrokerMaxWaitTimeMs : requestMaxWaitTimeMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Thread interrupted while waiting for FETCH operation (NO SUBSCRIPTION). Probably shutting down", e);
+            }
+
+            return new FetchResponse(responseData);
         }
 
         log.trace("Requested Fetch Offset: {} -- [{}]", requestOffset, sessionFetch ? "SESSION Fetch" : "STANDARD Fetch");
@@ -850,7 +873,7 @@ public class KafkaApiConsumerTools {
 
         // Create Response
         Errors errorCode = Errors.NONE;
-        int leaderEpoch = OpConstants.LEADER_ID_TOPIC_PARTITION;
+        int leaderEpoch = OpConstants.LEADER_EPOCH;
         if (!topicName.contentEquals(subscribedTopicName) || partitionIndex != subscribedPartitionIndex) {
             offsetToStart = OpConstants.UNKNOWN_OFFSET;
             leaderEpoch = OpConstants.UNKNOWN_LEADER_EPOCH;
@@ -873,17 +896,35 @@ public class KafkaApiConsumerTools {
         return new ListOffsetsResponse(responseData);
     }
 
-    public static AbstractResponse createFetchResponseInvalidSessionId(
+    public static AbstractResponse createFetchResponseNoGroupCoordinator(
         final FetchRequest request,
         final RequestHeader requestHeader)
     {
-        log.info("KafkaApiConsumerTools.createFetchResponseInvalidSessionId() -- Invalid sessionId in FetchRequest");
+        log.info("KafkaApiConsumerTools.createFetchResponseNoGroupCoordinator() -- No KafkaApiConsumerTools instance found for Fetch request -- Probably reconnecting consumer");
 
+        final FetchRequestData requestData = request.data();
+        final boolean sessionEligible = requestHeader.apiVersion() > 6;
+
+        final int sessionId = requestData.sessionId();
+        final int waitTime = requestData.maxWaitMs() > 0 ? requestData.maxWaitMs() : DEFAULT_BROKER_MAX_WAIT_TIME_MS;
+        final Errors error = sessionEligible && sessionId > 0 ? Errors.FETCH_SESSION_ID_NOT_FOUND : Errors.UNKNOWN_SERVER_ERROR;
+
+        // Create response with session error at top level AND partition errors
         FetchResponseData responseData = new FetchResponseData()
             .setThrottleTimeMs(0)
             .setSessionId(request.data().sessionId())
-            .setErrorCode(Errors.FETCH_SESSION_ID_NOT_FOUND.code())
+            .setErrorCode(error.code())
             .setResponses(Collections.emptyList());
+
+        try {
+            // Wait the full wait time before responding
+            // Give a chance for the group coordinator channel to subscribe to the queue
+            Thread.sleep(waitTime);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Thread interrupted while waiting for FETCH operation (NO SUBSCRIPTION). Probably shutting down", e);
+        }
+
         return new FetchResponse(responseData);
     }
 
@@ -905,6 +946,13 @@ public class KafkaApiConsumerTools {
 
         String topicName;
         try {
+            // Allow metadata refresh with no topics specified
+            if (requestData.topics().size() == 0) {
+                return new MetadataResponse(
+                    new MetadataResponseData().setThrottleTimeMs(0).setBrokers(ProxyConfig.isHaTuple() ? ProxyConfig.getPortToMetadataResponse().get(listenPort.brokers().iterator().next().port()) : listenPort.brokers())
+                            .setClusterId(listenPort.clusterId()).setControllerId(ProxyConfig.getNodeId()).setTopics(new MetadataResponseData.MetadataResponseTopicCollection()),
+                    requestHeader.apiVersion());
+            }
             topicName = requestData.topics().get(0).name();
         } catch (UnknownTopicOrPartitionException unknownTopicExc) {
             log.error("KafkaApiConsumerTools.createMetadataResponse() -- Only one topic is supported");
@@ -919,8 +967,8 @@ public class KafkaApiConsumerTools {
         final int partitionsPerTopic = getPartitionsPerTopic();
         for (int partitionId = 0; partitionId < partitionsPerTopic; partitionId++) {
             MetadataResponseData.MetadataResponsePartition partitionMetadata = new MetadataResponseData.MetadataResponsePartition()
-                    .setPartitionIndex(partitionId).setErrorCode(Errors.NONE.code()).setLeaderEpoch(OpConstants.LEADER_EPOCH).setLeaderId(OpConstants.LEADER_ID_TOPIC_PARTITION)
-                    .setReplicaNodes(Arrays.asList(0)).setIsrNodes(Arrays.asList(0))
+                    .setPartitionIndex(partitionId).setErrorCode(Errors.NONE.code()).setLeaderEpoch(OpConstants.LEADER_EPOCH).setLeaderId(ProxyConfig.getNodeId())
+                    .setReplicaNodes(Arrays.asList(ProxyConfig.getNodeId())).setIsrNodes(Arrays.asList(ProxyConfig.getNodeId()))
                     .setOfflineReplicas(Collections.emptyList());
             partitionList.add(partitionMetadata);
         }
@@ -932,10 +980,11 @@ public class KafkaApiConsumerTools {
         topics.add(topicMetadata);
 
         MetadataResponse metadataResponse = new MetadataResponse(
-                new MetadataResponseData().setThrottleTimeMs(0).setBrokers(listenPort.brokers())
-                        .setClusterId(listenPort.clusterId()).setControllerId(0).setTopics(topics),
+                new MetadataResponseData().setThrottleTimeMs(0).setBrokers(ProxyConfig.isHaTuple() ? ProxyConfig.getPortToMetadataResponse().get(listenPort.brokers().iterator().next().port()) : listenPort.brokers())
+                        .setClusterId(listenPort.clusterId()).setControllerId(ProxyConfig.getNodeId()).setTopics(topics),
                 requestHeader.apiVersion());
 
+        // log.debug("MetadataResponse: {}", metadataResponse);
         return metadataResponse;
     }
 
@@ -966,8 +1015,22 @@ public class KafkaApiConsumerTools {
         }
 
         if (!subscribed) {
-            log.error("Attempted to process OffsetCommit request but no active subscription");
-            return request.getErrorResponse(new UnknownServerException("No active subscription"));
+            // log.error("Attempted to process OffsetCommit request but no active subscription");
+            // return request.getErrorResponse(new UnknownServerException("No active subscription"));
+            log.warn("Attempted to process OffsetCommit request but no active subscription, returning error");
+            // This response should force consumer to re-join
+            OffsetCommitResponseData responseData = new OffsetCommitResponseData()
+                .setThrottleTimeMs(0)
+                .setTopics(List.of(
+                    new OffsetCommitResponseTopic()
+                        .setName(topicName)
+                        .setPartitions(List.of(
+                            new OffsetCommitResponsePartition()
+                                .setPartitionIndex(partitionIndex)
+                                .setErrorCode(Errors.UNKNOWN_MEMBER_ID.code())
+                        ))
+                ));
+            return new OffsetCommitResponse(responseData);            
         }
 
         // Delete old ack'd messages from memory
@@ -995,7 +1058,7 @@ public class KafkaApiConsumerTools {
                 return request.getErrorResponse(exc);
             }
         } catch (OffsetOutOfRangeException offsetExc) {
-            errorCode = Errors.UNKNOWN_SERVER_ERROR;
+            errorCode = Errors.UNKNOWN_MEMBER_ID;
             log.error(offsetExc.getLocalizedMessage());
         } catch (Exception exc) {
             errorCode = Errors.UNKNOWN_SERVER_ERROR;
@@ -1154,7 +1217,8 @@ public class KafkaApiConsumerTools {
         if (errorCode == Errors.NONE) {
             try {
                 final MetadataResponseBroker broker = listenPort.brokers().iterator().next();
-                nodeId = broker.nodeId();
+                // nodeId = broker.nodeId();
+                nodeId = ProxyConfig.getNodeId();
                 host = broker.host();
                 port = broker.port();
             } catch (Exception exc) {
@@ -1189,6 +1253,7 @@ public class KafkaApiConsumerTools {
                     .setPort(port);
             responseData.setCoordinators(List.of(coordinator));
         }
+        log.debug("FindCoordinatorResponse: {}", responseData);
         return new FindCoordinatorResponse(responseData);
     }
 
@@ -1207,7 +1272,7 @@ public class KafkaApiConsumerTools {
     {
         // TODO - Add capability to validate if Consumer Group exists?
         // "Consumer Group" exists would mean that there is a queue with prefix == requested group
-        // TODO - Evaluate if proxy should select protocol by precedence (probably doesn not matter)
+        // TODO - Evaluate if proxy should select protocol by precedence (probably does not matter)
         // 'cooperative-sticky', 'range', 'round-robin' -- currently always uses 1st in list
 
         final JoinGroupRequestData requestData = request.data();
@@ -1273,31 +1338,43 @@ public class KafkaApiConsumerTools {
         final HeartbeatRequest request,
         final RequestHeader requestHeader)
     {
-        // Validations
-        if (!subscribed) {
-            log.warn("Received {} request but no active subscription", ApiKeys.HEARTBEAT.name());
-            return request.getErrorResponse(0, new InvalidRequestException("No active subscription"));
-        }
+        // // Validations
+        // if (!subscribed) {
+        //     log.warn("Received {} request but no active subscription", ApiKeys.HEARTBEAT.name());
+        //     return request.getErrorResponse(0, new InvalidRequestException("No active subscription"));
+        // }
         HeartbeatResponseData responseData = new HeartbeatResponseData();
         responseData.setThrottleTimeMs(0);
-        responseData.setErrorCode(Errors.NONE.code());
+        responseData.setErrorCode(subscribed ? Errors.NONE.code() : Errors.UNKNOWN_MEMBER_ID.code());
         return new HeartbeatResponse(responseData);
     }
 
     public static AbstractResponse createHeartbeatResponseRebalancing()
     {
+
+
+        log.debug("HA TEST: KafkaApiConsumerTools.createHeartbeatResponseRebalancing -- Creating REBALANCING response");
+
+
         HeartbeatResponseData responseData = new HeartbeatResponseData();
         responseData.setThrottleTimeMs(0);
         // TODO: Evaluate if should use UNKNOWN_MEMBER_ID or REBALANCING
         responseData.setErrorCode(Errors.UNKNOWN_MEMBER_ID.code());
+        // responseData.setErrorCode(Errors.REBALANCE_IN_PROGRESS.code());
         return new HeartbeatResponse(responseData);
     }
 
-    public static AbstractResponse createOffsetCommitResponseRebalancing(
+    public static AbstractResponse createOffsetCommitResponseReconnect(
         final OffsetCommitRequest request,
         final RequestHeader requestHeader
     )
     {
+
+
+
+        log.debug("HA TEST: KafkaApiConsumerTools.createOffsetCommitResponseReconnect -- Creating UNKNOWN_MEMBER_ID response");
+
+
         final OffsetCommitRequestData requestData = request.data();
         final OffsetCommitResponseData responseData = new OffsetCommitResponseData();
         responseData.setThrottleTimeMs(0);
@@ -1312,6 +1389,7 @@ public class KafkaApiConsumerTools {
                     new OffsetCommitResponseData.OffsetCommitResponsePartition()
                     .setPartitionIndex(partition.partitionIndex())
                     .setErrorCode(Errors.UNKNOWN_MEMBER_ID.code());
+                    // .setErrorCode(Errors.REBALANCE_IN_PROGRESS.code());
                 // TODO: Evaluate if should use UNKNOWN_MEMBER_ID or REBALANCING
                 responseTopic.partitions().add(responsePartition);
             });

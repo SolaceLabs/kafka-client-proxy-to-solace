@@ -4,7 +4,7 @@
  
   <groupId>com.solace.kafkawireline</groupId>
   <artifactId>kafka-wireline-proxy</artifactId>
-  <version>0.1.1</version>
+  <version>0.1.2</version>
   <packaging>jar</packaging>
 
   <name>Kafka Wireline Proxy for Solace</name>

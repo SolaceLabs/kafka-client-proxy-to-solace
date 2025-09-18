@@ -119,7 +119,7 @@ public class ProxyReactor extends Thread {
             final InetSocketAddress address = listenEntry.getAddress();
             final InetSocketAddress advertisedAddress = (advertisedListenEntry == null) ? address : advertisedListenEntry;
             brokers.add(new MetadataResponseData.MetadataResponseBroker()
-                .setNodeId(0)
+                .setNodeId(ProxyConfig.getNodeId())
                 .setHost(advertisedAddress.getHostString())
                 .setPort(advertisedAddress.getPort())
                 .setRack(null));

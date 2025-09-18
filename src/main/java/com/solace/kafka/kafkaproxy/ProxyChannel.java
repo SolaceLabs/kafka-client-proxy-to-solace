@@ -694,18 +694,24 @@ public class ProxyChannel {
 						dataToSend(send, apiKey);
 						break;
 					}
-
-					if (kafkaApiConsumerTools == null) {
-						log.error("[Channel {}] KafkaApiConsumerTools is null for FETCH request -- likely consumer reconnecting", this.channelId);
-						log.debug("On consumer reconnect, we will tell the consumer that the session is bad to force group rejoin");
-						// Send a bad session response to the consumer
-						final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
-						AbstractResponse fetchResponseInvalidSession = KafkaApiConsumerTools.createFetchResponseInvalidSessionId(fetchRequest, requestHeader);
-						Send send = fetchResponseInvalidSession.toSend(requestHeader.toResponseHeader(), version);
-						dataToSend(send, apiKey);
-						break;
-					}
 				}
+				// 	if (kafkaApiConsumerTools == null) {
+				// 		// This can happen if the consumer is reconnecting and has not yet re-joined the group
+
+				// 		log.debug("HA TEST: ProxyChannel.handleRequest FETCH -- kafkaApiConsumerTools is null for FETCH request");
+
+				// 		log.warn("[Channel {}] KafkaApiConsumerTools is null for FETCH request -- likely consumer reconnecting", this.channelId);
+				// 		log.debug("On consumer reconnect, we will tell the consumer that the session is bad to force group rejoin");
+
+				// 		// Send a bad session response to the consumer (or unknown server error)
+				// 		final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
+				// 		AbstractResponse fetchResponseInvalidSession = KafkaApiConsumerTools.createFetchResponseNoGroupCoordinator(fetchRequest, requestHeader);
+
+				// 		// Send send = fetchResponseInvalidSession.toSend(requestHeader.toResponseHeader(), version);
+				// 		// dataToSend(send, apiKey);
+				// 		// break;
+				// 	}
+				// }
 
 				final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
                 final RequestHeader originalRequestHeader = requestHeader; // Capture for lambda/runnable
@@ -719,7 +725,15 @@ public class ProxyChannel {
                     boolean taskWorked = false;
                     try {
                         // This is the blocking call
-                        taskResponse = kafkaApiConsumerTools.createFetchChannelResponseWithLock(fetchRequest, originalRequestHeader);
+						if (kafkaApiConsumerTools != null) {
+							taskResponse = kafkaApiConsumerTools.createFetchChannelResponseWithLock(fetchRequest, originalRequestHeader);
+						} else {
+							// This can happen if the consumer is reconnecting and has not yet re-joined the group
+							// Call static method to create a response that indicates bad session
+							log.debug("HA TEST: ProxyChannel.FETCH async task -- kafkaApiConsumerTools is null for FETCH request");
+							log.warn("[Channel {}] KafkaApiConsumerTools is null for FETCH request -- likely consumer reconnecting", this.channelId);
+							taskResponse = KafkaApiConsumerTools.createFetchResponseNoGroupCoordinator(fetchRequest, originalRequestHeader);
+						}
                         taskWorked = true;
                     } catch (Exception e) {
                         log.error("[Channel {}] Exception in async FETCH processing (CorrId: {}): {}", this.channelId, originalRequestHeader.correlationId(), e.getMessage(), e);
@@ -772,10 +786,19 @@ public class ProxyChannel {
 				// METADATA Channel
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
 
-                MetadataRequest metadataRequest = (MetadataRequest) requestAndSize.request; // Safe cast after parseRequest
-                MetadataRequestData data = metadataRequest.data();
+                final MetadataRequest metadataRequest = (MetadataRequest) requestAndSize.request; // Safe cast after parseRequest
+                final MetadataRequestData data = metadataRequest.data();
 
-				if (data.topics().size() != 1) {
+				if (data.topics().size() == 0) {
+					// Return broker metadata only
+					final AbstractResponse metadataResponse = new MetadataResponse(
+							new MetadataResponseData().setThrottleTimeMs(0).setBrokers(ProxyConfig.isHaTuple() ? ProxyConfig.getPortToMetadataResponse().get(listenPort.brokers().iterator().next().port()) : listenPort.brokers())
+									.setClusterId(listenPort.clusterId()).setControllerId(ProxyConfig.getNodeId()).setTopics(new MetadataResponseData.MetadataResponseTopicCollection()),
+							version);
+	                Send send = metadataResponse.toSend(requestHeader.toResponseHeader(), version);
+	                dataToSend(send, apiKey);
+					break;
+				} else if (data.topics().size() != 1) {
 					log.error("Received {} request with topic count == {}, must == 1", apiKey.name(), data.topics().size());
 					Send send = requestAndSize.request.getErrorResponse(0, new InvalidRequestException("Received {} request with invalid topic count, must == 1")).toSend(requestHeader.toResponseHeader(), version);
 					dataToSend(send, apiKey);
@@ -795,8 +818,8 @@ public class ProxyChannel {
 					metadataResponse = KafkaApiConsumerTools.createMetadataResponse(metadataRequest, requestHeader, listenPort);
 				} else {
 					MetadataResponseData.MetadataResponsePartition partitionMetadata = new MetadataResponseData.MetadataResponsePartition()
-							.setPartitionIndex(0).setErrorCode(Errors.NONE.code()).setLeaderEpoch(OpConstants.LEADER_EPOCH).setLeaderId(OpConstants.LEADER_ID_TOPIC_PARTITION)
-							.setReplicaNodes(Arrays.asList(0)).setIsrNodes(Arrays.asList(0))
+							.setPartitionIndex(0).setErrorCode(Errors.NONE.code()).setLeaderEpoch(OpConstants.LEADER_EPOCH).setLeaderId(ProxyConfig.getNodeId())
+							.setReplicaNodes(Arrays.asList(ProxyConfig.getNodeId())).setIsrNodes(Arrays.asList(ProxyConfig.getNodeId()))
 							.setOfflineReplicas(Collections.emptyList());
 					List<MetadataResponseData.MetadataResponsePartition> partitionList = Collections.singletonList(partitionMetadata);
 					MetadataResponseData.MetadataResponseTopicCollection topics = new MetadataResponseData.MetadataResponseTopicCollection();
@@ -808,10 +831,14 @@ public class ProxyChannel {
 								.setIsInternal(false);
 						topics.add(topicMetadata);
 					}
+
+					// TODO: SET CONTROLLER TO PROXY ORDINAL FOR KUBERNETES
+
 					metadataResponse = new MetadataResponse(
-							new MetadataResponseData().setThrottleTimeMs(0).setBrokers(listenPort.brokers())
-									.setClusterId(listenPort.clusterId()).setControllerId(0).setTopics(topics),
+							new MetadataResponseData().setThrottleTimeMs(0).setBrokers(ProxyConfig.isHaTuple() ? ProxyConfig.getPortToMetadataResponse().get(listenPort.brokers().iterator().next().port()): listenPort.brokers())
+									.setClusterId(listenPort.clusterId()).setControllerId(ProxyConfig.getNodeId()).setTopics(topics),
 							version);
+					// log.debug("MetadataResponse: {}", metadataResponse);
 				}
                 Send send = metadataResponse.toSend(requestHeader.toResponseHeader(), version);
                 dataToSend(send, apiKey);
@@ -826,15 +853,19 @@ public class ProxyChannel {
                 final OffsetCommitRequest offsetCommitRequest = (OffsetCommitRequest) requestAndSize.request;
                 final RequestHeader originalRequestHeader = requestHeader; // Capture for lambda
 
-                if (kafkaApiConsumerTools == null) {
-					// TODO: Test if this condition works as desired
-					// If OffsetCommit is received on this channel and consumerTools is null, then return a response
-					// indicating UNKNOWN_MEMBER_ID - which indicates that the consumer must re-join the group
-					AbstractResponse response = KafkaApiConsumerTools.createOffsetCommitResponseRebalancing(null, requestHeader);
-                    Send send = response.toSend(requestHeader.toResponseHeader(), version);
-					dataToSend(send, apiKey);
-                    break;
-                }
+				// moved this block into the async task
+                // if (kafkaApiConsumerTools == null) {
+
+				// 	log.debug("HA TEST: ProxyChannel.handleRequest OFFSET_COMMIT -- kafkaApiConsumerTools is null");
+
+				// 	// TODO: Test if this condition works as desired
+				// 	// If OffsetCommit is received on this channel and consumerTools is null, then return a response
+				// 	// indicating UNKNOWN_MEMBER_ID - which indicates that the consumer must re-join the group
+				// 	AbstractResponse response = KafkaApiConsumerTools.createOffsetCommitResponseRebalancing(null, requestHeader);
+                //     Send send = response.toSend(requestHeader.toResponseHeader(), version);
+				// 	dataToSend(send, apiKey);
+                //     break;
+                // }
 
                 inFlightRequestCount++;
                 log.trace("[Channel {}] Offloading OFFSET_COMMIT request (CorrId: {}) to executor. In-flight: {}", this.channelId, originalRequestHeader.correlationId(), inFlightRequestCount);
@@ -844,7 +875,16 @@ public class ProxyChannel {
                     Exception taskException = null;
                     boolean taskWorked = false;
                     try {
-                        taskResponse = kafkaApiConsumerTools.createOffsetCommitResponse(offsetCommitRequest, originalRequestHeader);
+						if (kafkaApiConsumerTools != null) {
+							// happy path
+                        	taskResponse = kafkaApiConsumerTools.createOffsetCommitResponse(offsetCommitRequest, originalRequestHeader);
+						} else {
+							// This can happen if the consumer is reconnecting and has not yet re-joined the group
+							// which is required to subscribe to the solace queue
+							log.debug("HA TEST: ProxyChannel.OFFSET_COMMIT async task -- kafkaApiConsumerTools is null");
+							log.warn("[Channel {}] KafkaApiConsumerTools is null for OFFSET_COMMIT request -- likely consumer reconnecting", this.channelId);
+							taskResponse = KafkaApiConsumerTools.createOffsetCommitResponseReconnect(offsetCommitRequest, originalRequestHeader);
+						}
                         taskWorked = true;
                     } catch (Exception e) {
                         log.error("[Channel {}] Exception in async OFFSET_COMMIT processing (CorrId: {}): {}", this.channelId, originalRequestHeader.correlationId(), e.getMessage(), e);
@@ -926,8 +966,15 @@ public class ProxyChannel {
             case HEARTBEAT: {
 				// ApiKey=12
 				// GROUP channel
+
+
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
 				if (kafkaApiConsumerTools == null) {
+
+
+					log.debug("HA TEST: ProxyChannel.handleRequest HEARTBEAT -- kafkaApiConsumerTools is null");
+
+
 					// TODO: Test if this step works as desired
 					// If a heartbeat request is received and consumerTools is null, then the client will receive a notice
 					// that the Kafka cluster is rebalancing and should then rejoin the consumer group
