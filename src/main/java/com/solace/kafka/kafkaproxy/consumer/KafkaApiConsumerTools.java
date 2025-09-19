@@ -904,26 +904,55 @@ public class KafkaApiConsumerTools {
 
         final FetchRequestData requestData = request.data();
         final boolean sessionEligible = requestHeader.apiVersion() > 6;
+        final boolean topicIdEligible = requestHeader.apiVersion() > 12;
 
         final int sessionId = requestData.sessionId();
         final int waitTime = requestData.maxWaitMs() > 0 ? requestData.maxWaitMs() : DEFAULT_BROKER_MAX_WAIT_TIME_MS;
-        final Errors error = sessionEligible && sessionId > 0 ? Errors.FETCH_SESSION_ID_NOT_FOUND : Errors.UNKNOWN_SERVER_ERROR;
+
+        final List<FetchableTopicResponse> topicResponses = new ArrayList<>();
+
+        // For each topic and partition in the request, create a response with a FENCED_LEADER_EPOCH error.
+        for (FetchRequestData.FetchTopic fetchTopic : requestData.topics()) {
+            final FetchableTopicResponse topicResponse = new FetchableTopicResponse();
+            if (topicIdEligible) {
+                topicResponse.setTopicId(fetchTopic.topicId());
+            } else {
+                topicResponse.setTopic(fetchTopic.topic());
+            }
+
+            final List<PartitionData> partitionDataList = new ArrayList<>();
+            for (FetchRequestData.FetchPartition fetchPartition : fetchTopic.partitions()) {
+                final PartitionData partitionData = new PartitionData()
+                        .setPartitionIndex(fetchPartition.partition())
+                        .setErrorCode(Errors.FENCED_LEADER_EPOCH.code())
+                        .setHighWatermark(-1L)
+                        .setLastStableOffset(-1L)
+                        .setLogStartOffset(-1L)
+                        .setRecords(null);
+                partitionDataList.add(partitionData);
+            }
+            topicResponse.setPartitions(partitionDataList);
+            topicResponses.add(topicResponse);
+        }
+
+        // If this is a session-based fetch, the top-level error should indicate the session is not found.
+        final Errors topLevelError = sessionEligible && sessionId > 0 ? Errors.FETCH_SESSION_ID_NOT_FOUND : Errors.NONE;
 
         // Create response with session error at top level AND partition errors
         FetchResponseData responseData = new FetchResponseData()
             .setThrottleTimeMs(0)
             .setSessionId(request.data().sessionId())
-            .setErrorCode(error.code())
-            .setResponses(Collections.emptyList());
+            .setErrorCode(topLevelError.code())
+            .setResponses(topicResponses.isEmpty() ? Collections.emptyList() : topicResponses);
 
-        try {
-            // Wait the full wait time before responding
-            // Give a chance for the group coordinator channel to subscribe to the queue
-            Thread.sleep(waitTime);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("Thread interrupted while waiting for FETCH operation (NO SUBSCRIPTION). Probably shutting down", e);
-        }
+        // try {
+        //     // Wait the full wait time before responding
+        //     // Give a chance for the group coordinator channel to subscribe to the queue
+        //     Thread.sleep(waitTime);
+        // } catch (InterruptedException e) {
+        //     Thread.currentThread().interrupt();
+        //     log.warn("Thread interrupted while waiting for FETCH operation (NO SUBSCRIPTION). Probably shutting down", e);
+        // }
 
         return new FetchResponse(responseData);
     }

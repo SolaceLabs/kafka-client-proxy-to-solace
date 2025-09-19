@@ -182,7 +182,7 @@ public class ProxyChannel {
 		}
 	}
 
-	final static class AuthorizationResult extends ProxyReactor.WorkEntry {
+	static class AuthorizationResult extends ProxyReactor.WorkEntry {
 		private final RequestHeader requestHeader;
 		private final boolean worked;
 
@@ -217,8 +217,24 @@ public class ProxyChannel {
 		}
 	}
 
-	// Add this inner class to ProxyChannel.java
-	final static class FetchResponseResult extends ProxyReactor.WorkEntry {
+    /**
+     * A special AuthorizationResult that does nothing when addToWorkQueue is called.
+     * This is used to pass context to legacy methods that might try to queue a result,
+     * preventing them from doing so in the new asynchronous flow.
+     */
+    final static class DetachedAuthorizationResult extends AuthorizationResult {
+        public DetachedAuthorizationResult(ProxyChannel proxyChannel, RequestHeader requestHeader) {
+            super(proxyChannel, requestHeader);
+        }
+
+        @Override
+        public void addToWorkQueue() {
+            // DO NOTHING. This prevents the legacy flow from queuing a duplicate work entry.
+        }
+    }
+
+    // Add this inner class to ProxyChannel.java
+    final static class FetchResponseResult extends ProxyReactor.WorkEntry {
 	    private final AbstractResponse response;
 	    private final RequestHeader requestHeader;
 	    private final ApiKeys apiKey = ApiKeys.FETCH;
@@ -272,7 +288,34 @@ public class ProxyChannel {
 	    }
 	}
 	
-	final static class Close extends ProxyReactor.WorkEntry {
+	final static class SaslAuthenticateResponseResult extends ProxyReactor.WorkEntry {
+        private final RequestHeader requestHeader;
+        private final ApiKeys apiKey = ApiKeys.SASL_AUTHENTICATE;
+        private final boolean worked;
+        private final Exception exception;
+        private final ProxyPubSubPlusSession session;
+
+        public SaslAuthenticateResponseResult(ProxyChannel proxyChannel, RequestHeader requestHeader, boolean worked, Exception exception, ProxyPubSubPlusSession session) {
+            super(proxyChannel);
+            this.requestHeader = requestHeader;
+            this.worked = worked;
+            this.exception = exception;
+            this.session = session;
+        }
+
+        public RequestHeader getRequestHeader() { return requestHeader; }
+        public ApiKeys getApiKey() { return apiKey; }
+        public boolean getWorked() { return worked; }
+        public Exception getException() { return exception; }
+        public ProxyPubSubPlusSession getSession() { return session; }
+
+        @Override
+        public String toString() {
+            return "SaslAuthenticateResponseResult{requestHeaderCorId=" + (requestHeader != null ? requestHeader.correlationId() : "null") + ", worked=" + worked + ", exception=" + (exception != null ? exception.getMessage() : "null") + "}";
+        }
+    }
+    
+    final static class Close extends ProxyReactor.WorkEntry {
 		private final String reason;
 
 		public Close(ProxyChannel proxyChannel, String reason) {
@@ -456,25 +499,43 @@ public class ProxyChannel {
             // }
 			proxySasl.adjustState(apiKey);
 		} else {
-            log.debug("Received SASL authentication request without Kafka header (remote " + 
+            log.debug("Received SASL authentication request without Kafka header (remote " +
                       transportLayer.socketChannel().socket().getRemoteSocketAddress()
                       + ")");
-			byte[] clientToken = new byte[buffer.remaining()];
-			buffer.get(clientToken, 0, clientToken.length);
-			ProxyChannel.AuthorizationResult authResult = new ProxyChannel.AuthorizationResult(this, null);
+            final byte[] clientToken = new byte[buffer.remaining()];
+            buffer.get(clientToken, 0, clientToken.length);
+
             inFlightRequestCount++;
-			try {
-				session = proxySasl.authenticate(authResult, clientToken);
-				// authorizationResult(null, true);				// This will report success before authentication completes
-			} catch (Exception e) {
-				inFlightRequestCount--; // Decrement since the async operation could not be started
-				log.info("Sasl authentication failed: " + e);
-				authorizationResult(null, false);
-			}
-			return false;
-		}
-        
-		short apiVersion = header.apiVersion();
+            log.trace("[Channel {}] Offloading RAW SASL_AUTHENTICATE request to executor. In-flight: {}",
+                      this.channelId, inFlightRequestCount);
+
+            ProxyReactor.getRequestHandlerExecutor().submit(() -> {
+                Exception taskException = null;
+                boolean taskWorked = false;
+                ProxyPubSubPlusSession newSession = null;
+                try {
+                    // This is the blocking call, now running in a background thread.
+                    // Create a DetachedAuthorizationResult to prevent the legacy authenticate method
+                    // from queuing a duplicate work entry. The RequestHeader is null for this flow.
+                    DetachedAuthorizationResult detachedAuthResult = new DetachedAuthorizationResult(this, null);
+                    newSession = proxySasl.authenticate(detachedAuthResult, clientToken);
+                    taskWorked = true;
+                    log.debug("[Channel {}] RAW SASL authentication succeeded in background", this.channelId);
+                } catch (Exception e) {
+                    log.warn("[Channel {}] RAW SASL authentication failed in background: {}", this.channelId, e.getMessage(), e);
+                    taskException = e;
+                } finally {
+                    // Create the primary result object and queue it for the reactor thread to process.
+                    // The requestHeader is null for this flow.
+                    SaslAuthenticateResponseResult result = new SaslAuthenticateResponseResult(
+                        this, null, taskWorked, taskException, newSession);
+                    result.addToWorkQueue();
+                }
+            });
+            return false;
+        }
+
+        short apiVersion = header.apiVersion();
 		RequestAndSize requestAndSize;
 		if (apiKey == API_VERSIONS && !API_VERSIONS.isVersionSupported(apiVersion)) {
 			// TODO: Figure out why this did not work for request from Kafka client v3.9
@@ -1100,21 +1161,43 @@ public class ProxyChannel {
             	break;
 			}
             case SASL_AUTHENTICATE: {
-				// ApiKey=36
-				// All Channels
-                SaslAuthenticateRequest saslAuthenticateRequest = (SaslAuthenticateRequest) requestAndSize.request; // Safe cast after parseRequest
-                ProxyChannel.AuthorizationResult authResult = new ProxyChannel.AuthorizationResult(this, requestHeader);
-                inFlightRequestCount++;
-                try {
-					// Stop flow gracefully if it is running as the next step will replace it (should not happen)
-                    session = proxySasl.authenticate(authResult, saslAuthenticateRequest.data().authBytes());
-                } catch (Exception e) {
-                    inFlightRequestCount--; // Decrement since the async operation could not be started
-                    log.info("Sasl authentication failed: " + e);
-                    authorizationResult(requestHeader, false);
-                }
+                // ApiKey=36
+                // All Channels - Now non-blocking
+                final SaslAuthenticateRequest saslAuthenticateRequest = (SaslAuthenticateRequest) requestAndSize.request;
+                final RequestHeader originalRequestHeader = requestHeader;
+                final byte[] authBytes = saslAuthenticateRequest.data().authBytes();
 
-                return false; // we are either waiting for authentication or could not even try to connect
+                inFlightRequestCount++;
+                log.trace("[Channel {}] Offloading SASL_AUTHENTICATE request (CorrId: {}) to executor. In-flight: {}",
+                          this.channelId, originalRequestHeader.correlationId(), inFlightRequestCount);
+
+                ProxyReactor.getRequestHandlerExecutor().submit(() -> {
+                    Exception taskException = null;
+                    boolean taskWorked = false;
+                    ProxyPubSubPlusSession newSession = null;
+                    try {
+                        // This is the blocking call, now running in a background thread.
+                        // We create a DETACHED AuthorizationResult to prevent the legacy authenticate method
+                        // from queuing a duplicate work entry.
+                        DetachedAuthorizationResult detachedAuthResult = new DetachedAuthorizationResult(this, originalRequestHeader);
+                        newSession = proxySasl.authenticate(detachedAuthResult, authBytes);
+                        taskWorked = true;
+                        log.debug("[Channel {}] SASL authentication succeeded in background (CorrId: {})",
+                                 this.channelId, originalRequestHeader.correlationId());
+                    } catch (Exception e) {
+                        log.warn("[Channel {}] SASL authentication failed in background (CorrId: {}): {}",
+                                this.channelId, originalRequestHeader.correlationId(), e.getMessage(), e);
+                        taskException = e;
+                    } finally {
+                        // Create the primary result object and queue it for the reactor thread to process.
+                        // This is the ONLY work entry that should be queued for this operation.
+                        SaslAuthenticateResponseResult result = new SaslAuthenticateResponseResult(
+                            this, originalRequestHeader, taskWorked, taskException, newSession);
+                        result.addToWorkQueue();
+                    }
+                });
+
+                return false; // Stop reading from channel, wait for async result.
             }
             default: {
                 log.error("Unhanded request type: " + apiKey.toString());
@@ -1279,19 +1362,20 @@ public class ProxyChannel {
 
 	// only call this from Reactor thread
 	void handleWorkEntry(ProxyReactor.WorkEntry workEntry) {
-		// Almost all of the work is ProduceAckState so check for that first
-		if (workEntry instanceof ProduceAckState) {
+        // Almost all of the work is ProduceAckState so check for that first
+        if (workEntry instanceof ProduceAckState) {
             inFlightRequestCount--;
             log.trace("[Channel {}] Handled ProduceAckState. In-flight: {}", this.channelId, inFlightRequestCount);
-			produceResponseProcesssing.handleProduceAckState((ProduceAckState) workEntry);
-		} else if (workEntry instanceof AuthorizationResult) {
+            produceResponseProcesssing.handleProduceAckState((ProduceAckState) workEntry);
+        } else if (workEntry instanceof AuthorizationResult) {
+            // This block should no longer be used by the SASL flow.
+            // It is kept for any other potential legacy use, but SASL is now self-contained.
+            log.warn("[Channel {}] Legacy AuthorizationResult processed. This should not be part of the SASL flow.", this.channelId);
             inFlightRequestCount--;
-            log.debug("[Channel {}] Handled AuthorizationResult. In-flight: {}", this.channelId, inFlightRequestCount);
-			AuthorizationResult authResult = (AuthorizationResult) workEntry;
-			final boolean worked = authResult.getWorked();
-			authorizationResult(authResult.getRequestHeader(), worked);
-            if (!worked) return; // if did not work then we are done as channel will be closed
-		} else if (workEntry instanceof FetchResponseResult) {
+            AuthorizationResult authResult = (AuthorizationResult) workEntry;
+            authorizationResult(authResult.getRequestHeader(), authResult.getWorked());
+            if (!authResult.getWorked()) return;
+        } else if (workEntry instanceof FetchResponseResult) {
             inFlightRequestCount--;
             FetchResponseResult fetchResult = (FetchResponseResult) workEntry;
             log.trace("[Channel {}] Handled FetchResponseResult (CorrId: {}). In-flight: {}", this.channelId, fetchResult.getRequestHeader().correlationId(), inFlightRequestCount);
@@ -1339,7 +1423,51 @@ public class ProxyChannel {
                 close("Could not send OFFSET_COMMIT response: " + e);
                 return;
             }
-		} else if (workEntry instanceof Close) {
+        } else if (workEntry instanceof SaslAuthenticateResponseResult) {
+            inFlightRequestCount--;
+            SaslAuthenticateResponseResult authResult = (SaslAuthenticateResponseResult) workEntry;
+            RequestHeader header = authResult.getRequestHeader(); // Can be null for raw SASL
+            log.trace("[Channel {}] Handled SaslAuthenticateResponseResult (CorrId: {}). In-flight: {}", this.channelId, (header != null ? header.correlationId() : "N/A"), inFlightRequestCount);
+
+            try {
+                if (authResult.getWorked()) {
+                    // Authentication succeeded
+                    this.session = authResult.getSession();
+                    proxySasl.setComplete(true);
+                }
+
+                // --- Build and send the response directly here ---
+                if (enableKafkaSaslAuthenticateHeaders) {
+                    // This flow uses Kafka headers
+                    if (header == null) {
+                        // This is a logic error, should not happen in this branch
+                        throw new IllegalStateException("RequestHeader is null in Kafka-header SASL flow.");
+                    }
+                    SaslAuthenticateResponseData responseData = new SaslAuthenticateResponseData()
+                            .setErrorCode(authResult.getWorked() ? Errors.NONE.code() : Errors.SASL_AUTHENTICATION_FAILED.code())
+                            .setAuthBytes(new byte[0])
+                            .setSessionLifetimeMs(0L);
+                    SaslAuthenticateResponse response = new SaslAuthenticateResponse(responseData);
+                    Send send = response.toSend(header.toResponseHeader(), header.apiVersion());
+                    dataToSend(send, ApiKeys.SASL_AUTHENTICATE);
+                } else {
+                    // This is the "raw" SASL flow without Kafka headers
+                    // We only send a response on success (an empty buffer). On failure, we just close.
+                    if (authResult.getWorked()) {
+                        Send netOutBuffer = ByteBufferSend.sizePrefixed(ByteBuffer.wrap(new byte[0]));
+                        dataToSend(netOutBuffer, ApiKeys.SASL_AUTHENTICATE);
+                    }
+                }
+
+                // If authentication failed, close the channel now that the error response has been sent.
+                if (!authResult.getWorked()) {
+                    close("due to authentication failure");
+				}
+            } catch (Exception e) {
+                log.error("[Channel {}] Exception handling SASL_AUTHENTICATE result (CorrId: {}): {}", this.channelId, (header != null ? header.correlationId() : "N/A"), e.getMessage(), e);
+                close("Error processing SASL result: " + e.getMessage());
+            }
+        } else if (workEntry instanceof Close) {
 			log.debug("[Channel {}] Handling Close work entry.", this.channelId);
 			final Close closeReq = (Close) workEntry;
 			close(closeReq.getReason());
