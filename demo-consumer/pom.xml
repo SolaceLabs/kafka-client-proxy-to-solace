@@ -6,7 +6,7 @@
 
     <groupId>com.solace.kafkawireline</groupId>
     <artifactId>kafka-demo-consumer</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <packaging>jar</packaging>
 
     <name>Kafka Demo Consumer</name>

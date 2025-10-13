@@ -850,6 +850,12 @@ public class ProxyChannel {
                 final MetadataRequest metadataRequest = (MetadataRequest) requestAndSize.request; // Safe cast after parseRequest
                 final MetadataRequestData data = metadataRequest.data();
 
+
+				log.debug("###RECONNECT### ProxyChannel.handleRequest METADATA -- clientId: {} -- kafkaApiConsumerTools: {}",
+					requestHeader.clientId(),
+					(kafkaApiConsumerTools == null ? "null" : "not null"));
+
+
 				if (data.topics().size() == 0) {
 					// Return broker metadata only
 					final AbstractResponse metadataResponse = new MetadataResponse(
@@ -1030,6 +1036,8 @@ public class ProxyChannel {
 
 
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
+				HeartbeatRequest heartbeatRequest = (HeartbeatRequest) requestAndSize.request; // Safe cast after parseRequest
+
 				if (kafkaApiConsumerTools == null) {
 
 
@@ -1039,12 +1047,11 @@ public class ProxyChannel {
 					// TODO: Test if this step works as desired
 					// If a heartbeat request is received and consumerTools is null, then the client will receive a notice
 					// that the Kafka cluster is rebalancing and should then rejoin the consumer group
-					AbstractResponse response = KafkaApiConsumerTools.createHeartbeatResponseRebalancing();
+					AbstractResponse response = KafkaApiConsumerTools.createHeartbeatResponseRebalancing(heartbeatRequest, requestHeader);
 					Send send = response.toSend(requestHeader.toResponseHeader(), version);
 					dataToSend(send, apiKey);
 					break;
 				}
-				HeartbeatRequest heartbeatRequest = (HeartbeatRequest) requestAndSize.request; // Safe cast after parseRequest
 				AbstractResponse heartbeatResponse = kafkaApiConsumerTools.createHeartbeatResponse(heartbeatRequest, requestHeader);
 				Send send = heartbeatResponse.toSend(requestHeader.toResponseHeader(), version);
 				dataToSend(send, apiKey);
@@ -1058,6 +1065,16 @@ public class ProxyChannel {
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
 				
 				LeaveGroupRequest leaveGroupRequest = (LeaveGroupRequest) requestAndSize.request; // Safe cast after parseRequest
+
+				if (kafkaApiConsumerTools == null) {
+					// This can happen if the consumer is reconnecting and has not yet re-joined the group for some Kafka API versions
+					log.debug("HA TEST: ProxyChannel.handleRequest LEAVE_GROUP -- kafkaApiConsumerTools is null");
+					AbstractResponse leaveGroupResponse = KafkaApiConsumerTools.createLeaveGroupResponseNoGroupCoordinator(leaveGroupRequest, requestHeader);
+					Send send = leaveGroupResponse.toSend(requestHeader.toResponseHeader(), version);
+					dataToSend(send, apiKey);
+					break;
+				}
+
 				AbstractResponse leaveGroupResponse = kafkaApiConsumerTools.createLeaveGroupResponse(leaveGroupRequest, requestHeader);
 				Send send = leaveGroupResponse.toSend(requestHeader.toResponseHeader(), version);
 				dataToSend(send, apiKey);
@@ -1410,8 +1427,8 @@ public class ProxyChannel {
                     );
                     dataToSend(send, commitResult.getApiKey());
                 } else {
-                     log.error("[Channel {}] Async OFFSET_COMMIT task (CorrId: {}) failed critically, no response to send. Closing channel. Exception: {}",
-                              this.channelId, commitResult.getRequestHeader().correlationId(), commitResult.getException() != null ? commitResult.getException().getMessage() : "Unknown");
+                    log.error("[Channel {}] Async OFFSET_COMMIT task (CorrId: {}) failed critically, no response to send. Closing channel. Exception: {}",
+                                this.channelId, commitResult.getRequestHeader().correlationId(), commitResult.getException() != null ? commitResult.getException().getMessage() : "Unknown");
                     // Attempt to send a generic error if possible, otherwise close
                     // For OffsetCommit, getErrorResponse might not be directly available on the original request if it was already transformed.
                     // Consider a generic error response or closing.

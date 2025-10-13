@@ -42,7 +42,13 @@ public class KeyValueConsumer {
         options.addRequiredOption("t", "topic", true, "Name of the Kafka topic to consume from");
         options.addOption("g", "group-id", true, "Consumer group ID (defaults to a random UUID)");
         options.addOption("p", "poll-time", true, "The polling time in milliseconds (default: 500)");
+        options.addOption("l", "client-id", true, "Kafka client ID for the consumer");
         options.addOption("h", "help", false, "Print this help message");
+        options.addOption("a", "commit-async", false, "Use ASYNCHRONOUS commit instead of auto-commit (default: auto-commit)." +
+                " If set, the consumer will commit offsets only after processing messages after each POLL request.");
+        options.addOption("s", "commit-sync", false, "Use SYNCHRONOUS commit instead of auto-commit (default: auto-commit)." +
+                " If set, the consumer will commit offsets only after processing messages after each POLL request." +
+                " Ignored if --commit-async is also set.");
 
         CommandLineParser parser = new DefaultParser();
         HelpFormatter formatter = new HelpFormatter();
@@ -64,9 +70,13 @@ public class KeyValueConsumer {
             return;
         }
 
+        final boolean useAsyncCommit = cmd.hasOption("a");
+        final boolean useSyncCommit = cmd.hasOption("s") && !useAsyncCommit;
+
         String configFilePath = cmd.getOptionValue("c");
         String topicName = cmd.getOptionValue("t");
         String groupId = cmd.getOptionValue("g", "consumer-group-" + UUID.randomUUID().toString());
+        String clientId = cmd.getOptionValue("l");
         long pollTimeMs = Long.parseLong(cmd.getOptionValue("p", "500"));
 
         if (pollTimeMs < 100) {
@@ -89,13 +99,37 @@ public class KeyValueConsumer {
             return;
         }
 
+        if (useAsyncCommit || useSyncCommit) {
+            properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+            logger.info("Auto-commit disabled. Using {} commit.", useAsyncCommit ? "ASYNC" : "SYNC");
+        } else {
+            // Default to auto-commit if neither async nor sync commit is specified
+            properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
+            if (properties.containsKey(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG)) {
+                logger.info("Auto-commit enabled with interval of {}ms.",
+                        properties.getProperty(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG));
+            } else {
+                properties.setProperty(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, "1000"); // Commit every second
+                logger.info("Auto-commit enabled with default interval of 1000ms.");
+            }
+        }
+
         // Essential consumer properties
         properties.setProperty(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         properties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest"); // earliest or latest
-        properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
-        properties.setProperty(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, "1000");
+        // properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest"); // earliest or latest
+        // properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
+        // properties.setProperty(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, "1000");
+
+        // Set client ID if provided
+        if (clientId != null && !clientId.trim().isEmpty()) {
+            properties.setProperty(ConsumerConfig.CLIENT_ID_CONFIG, clientId);
+            logger.info("Using client ID: {}", clientId);
+        } else {
+            clientId = "Default";
+        }
+        final String actualClientId = clientId;
 
         final KafkaConsumer<String, String> consumer = new KafkaConsumer<>(properties);
         final Thread mainThread = Thread.currentThread(); // Get a reference to the main thread
@@ -128,13 +162,43 @@ public class KeyValueConsumer {
                 if (records.isEmpty() && !Thread.currentThread().isInterrupted()) {
                     // Optional: log if no records received for a while, or just continue polling
                 }
+
+                int nodeId = -1;
+                try {
+                    nodeId = consumer.partitionsFor(topicName).get(0).leader().id();
+                } catch (Exception e) {
+                    logger.warn("Error getting leader node ID for topic {}: {}", topicName, e.getMessage());
+                }
+                final String nodeIdStr = (nodeId != -1) ? String.valueOf(nodeId) : "X";
+
                 for (ConsumerRecord<String, String> record : records) {
                     // System.out.printf("KEY: %s - VALUE: %s (Partition: %d, Offset: %d)%n",
-                    System.out.printf("%s - %.60s (P[%02d] - %06d)%n",
-                            record.key(), record.value(), record.partition(), record.offset());
-                    logger.debug("Consumed record: key={}, value={}, partition={}, offset={}",
-                            record.key(), record.value(), record.partition(), record.offset());
+                    System.out.printf("<-- %-10.10s - %.50s [%06d] P[%02d] N[%s] C[%s]%n",
+                            record.key(), record.value(), record.offset(), record.partition(), nodeIdStr, actualClientId);
+                    logger.debug("Consumed record: key={}, value={}, partition={}, offset={}, clientId={}, nodeId={}",
+                            record.key(), record.value(), record.partition(), record.offset(), actualClientId, nodeIdStr);
                     receivedMessages++;
+                }
+
+                if (useAsyncCommit) {
+                    try {
+                        consumer.commitAsync((offsets, exception) -> {
+                            if (exception != null) {
+                                logger.error("Asynchronous commit failed for offsets {}: {}", offsets, exception.getMessage());
+                            } else {
+                                logger.debug("Asynchronously committed offsets: {}", offsets);
+                            }
+                        });
+                    } catch (Exception e) {
+                        logger.error("Exception during asynchronous commit: {}", e.getMessage());
+                    }
+                } else if (useSyncCommit) {
+                    try {
+                        consumer.commitSync();
+                        logger.debug("Synchronously committed offsets.");
+                    } catch (Exception e) {
+                        logger.error("Exception during synchronous commit: {}", e.getMessage());
+                    }
                 }
             }
         } catch (WakeupException e) {

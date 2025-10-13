@@ -29,6 +29,7 @@ import java.util.UUID;
 import java.util.Base64.Decoder;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.stream.Collectors;
 
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor.Assignment;
 import org.apache.kafka.clients.consumer.internals.ConsumerProtocol;
@@ -907,7 +908,18 @@ public class KafkaApiConsumerTools {
         final boolean topicIdEligible = requestHeader.apiVersion() > 12;
 
         final int sessionId = requestData.sessionId();
-        final int waitTime = requestData.maxWaitMs() > 0 ? requestData.maxWaitMs() : DEFAULT_BROKER_MAX_WAIT_TIME_MS;
+        // final int waitTime = requestData.maxWaitMs() > 0 ? requestData.maxWaitMs() : DEFAULT_BROKER_MAX_WAIT_TIME_MS;
+
+
+        // TODO: RECONNECT TRACE
+        log.debug("##RECONNECT## -- Fetch Request -- sessionId: {} -- clientId: {} -- topics: {}",
+            sessionId,
+            requestHeader.clientId(),
+            requestData.topics().stream().map(t -> t.topic()).collect(Collectors.joining(","))
+        );
+
+        // REPORT FENCED_LEADER_EPOCH on each partition if sessionId > 0 when group coordinator channel is not found
+        Errors partitionError = sessionId > 0 ? Errors.FENCED_LEADER_EPOCH : Errors.NONE;
 
         final List<FetchableTopicResponse> topicResponses = new ArrayList<>();
 
@@ -924,11 +936,11 @@ public class KafkaApiConsumerTools {
             for (FetchRequestData.FetchPartition fetchPartition : fetchTopic.partitions()) {
                 final PartitionData partitionData = new PartitionData()
                         .setPartitionIndex(fetchPartition.partition())
-                        .setErrorCode(Errors.FENCED_LEADER_EPOCH.code())
+                        .setErrorCode(partitionError.code())
                         .setHighWatermark(-1L)
                         .setLastStableOffset(-1L)
                         .setLogStartOffset(-1L)
-                        .setRecords(null);
+                        .setRecords(MemoryRecords.EMPTY);
                 partitionDataList.add(partitionData);
             }
             topicResponse.setPartitions(partitionDataList);
@@ -972,6 +984,13 @@ public class KafkaApiConsumerTools {
         ListenPort listenPort)
     {
         final MetadataRequestData requestData = request.data();
+
+
+        log.debug("###RECONNECT### -- Metadata Request -- clientId: {} -- topics: {}",
+            requestHeader.clientId(),
+            ! requestData.topics().isEmpty() ? requestData.topics().stream().map(t -> t.name()).collect(Collectors.joining(",")) : "[NONE]"
+        );
+
 
         String topicName;
         try {
@@ -1378,11 +1397,19 @@ public class KafkaApiConsumerTools {
         return new HeartbeatResponse(responseData);
     }
 
-    public static AbstractResponse createHeartbeatResponseRebalancing()
+    public static AbstractResponse createHeartbeatResponseRebalancing(
+        final HeartbeatRequest request,
+        final RequestHeader requestHeader
+    )
     {
 
 
         log.debug("HA TEST: KafkaApiConsumerTools.createHeartbeatResponseRebalancing -- Creating REBALANCING response");
+
+
+        log.debug("###RECONNECT### -- Heartbeat Request -- clientId: {}",
+            requestHeader.clientId()
+        );
 
 
         HeartbeatResponseData responseData = new HeartbeatResponseData();
@@ -1401,25 +1428,30 @@ public class KafkaApiConsumerTools {
 
 
 
+        log.debug("##RECONNECT## -- OffsetCommit Request -- clientId: {} -- topics: {}",
+            requestHeader.clientId(),
+            request.data().topics().stream().map(t -> t.name()).collect(Collectors.joining(","))
+        );
+
         log.debug("HA TEST: KafkaApiConsumerTools.createOffsetCommitResponseReconnect -- Creating UNKNOWN_MEMBER_ID response");
 
 
         final OffsetCommitRequestData requestData = request.data();
         final OffsetCommitResponseData responseData = new OffsetCommitResponseData();
         responseData.setThrottleTimeMs(0);
-        responseData.setTopics(Collections.emptyList());
+        responseData.setTopics(new ArrayList<>()); // Changed from Collections.emptyList()
+        
         requestData.topics().forEach( topic -> {
             OffsetCommitResponseData.OffsetCommitResponseTopic responseTopic = 
                 new OffsetCommitResponseData.OffsetCommitResponseTopic()
                 .setName(topic.name());
-            responseTopic.setPartitions(Collections.emptyList());
+            responseTopic.setPartitions(new ArrayList<>()); // Changed from Collections.emptyList()
+            
             topic.partitions().forEach( partition -> {
                 OffsetCommitResponseData.OffsetCommitResponsePartition responsePartition = 
                     new OffsetCommitResponseData.OffsetCommitResponsePartition()
                     .setPartitionIndex(partition.partitionIndex())
                     .setErrorCode(Errors.UNKNOWN_MEMBER_ID.code());
-                    // .setErrorCode(Errors.REBALANCE_IN_PROGRESS.code());
-                // TODO: Evaluate if should use UNKNOWN_MEMBER_ID or REBALANCING
                 responseTopic.partitions().add(responsePartition);
             });
             responseData.topics().add(responseTopic);
@@ -1470,6 +1502,39 @@ public class KafkaApiConsumerTools {
                     .setMemberId(memberId)
                     .setGroupInstanceId(groupInstanceId)
                     .setErrorCode(leaveGroupResult.code())));
+        return new LeaveGroupResponse(responseData);
+    }
+
+    public static AbstractResponse createLeaveGroupResponseNoGroupCoordinator(
+        final LeaveGroupRequest request,
+        final RequestHeader requestHeader)
+    {
+        log.info("KafkaApiConsumerTools.createLeaveGroupResponseNoGroupCoordinator() -- No KafkaApiConsumerTools instance found for LeaveGroup request -- Probably reconnecting consumer");
+
+        final LeaveGroupRequestData requestData = request.data();
+        String memberId = "";
+        String groupInstanceId = "";
+        // Member ID can be in different places based upon Api version
+        try {
+            if (requestHeader.apiVersion() > 2) {
+                memberId = requestData.members().get(0).memberId();
+                groupInstanceId = requestData.members().get(0).groupInstanceId();
+            } else {
+                memberId = requestData.memberId();
+            }
+        } catch (Exception exc) {
+            log.warn("Failed to parse LeaveGroup request -- but returning success response anyway");
+        }
+
+        final LeaveGroupResponseData responseData = 
+                new LeaveGroupResponseData()
+                    .setThrottleTimeMs(0)
+                    .setErrorCode(Errors.NONE.code());
+        responseData.setMembers(List.of(
+                new LeaveGroupResponseData.MemberResponse()
+                    .setMemberId(memberId)
+                    .setGroupInstanceId(groupInstanceId)
+                    .setErrorCode(Errors.NONE.code())));
         return new LeaveGroupResponse(responseData);
     }
 
