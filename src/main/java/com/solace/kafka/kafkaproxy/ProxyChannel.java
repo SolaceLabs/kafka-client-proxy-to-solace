@@ -83,6 +83,7 @@ import com.solace.kafka.kafkaproxy.util.OpConstants;
 import com.solace.kafka.kafkaproxy.util.ProxyUtils;
 
 public class ProxyChannel {
+
 	private static final Logger log = LoggerFactory.getLogger(ProxyChannel.class);
 	private final Queue<Send> sendQueue;
 	private final TransportLayer transportLayer;
@@ -106,6 +107,7 @@ public class ProxyChannel {
 	private final int maxProduceMessageBytes;
 	private boolean consumerMetadataChannel = false;
 	private boolean sessionClosed = false;
+	private int maxKafkaRequestSizeBytes = 0;
 
 	private static int channelIdGenerator = 0;
 	private int channelId = channelIdGenerator++;
@@ -388,7 +390,8 @@ public class ProxyChannel {
 		enableKafkaSaslAuthenticateHeaders = false;
 		produceResponseProcesssing = new ProxyChannel.ProduceResponseProcessing();
 		listenPort.addChannel(this);
-		maxProduceMessageBytes = ProxyConfig.getInstance().getInt(ProxyConfig.PRODUCE_MESSAGE_MAX_BYTES);
+		this.maxProduceMessageBytes = ProxyConfig.getInstance().getInt(ProxyConfig.PRODUCE_MESSAGE_MAX_BYTES);
+		this.maxKafkaRequestSizeBytes = ProxyConfig.getInstance().getInt(ProxyConfig.REQUEST_MAX_BYTES);
 		sendQueue = new LinkedList<Send>();
 
         this.validationBuffer = ByteBuffer.allocate(16);
@@ -1280,6 +1283,16 @@ public class ProxyChannel {
 							close("Invalid receive (size = " + receiveSize + ")");
 							return;
 						}
+
+						if (receiveSize > maxKafkaRequestSizeBytes) {
+							log.error("[Channel {}] Request size {} exceeds maximum allowed size {}. " +
+									"Possible attack or misconfiguration from {}. Closing connection.",
+									this.channelId, receiveSize, maxKafkaRequestSizeBytes,
+									transportLayer.socketChannel().socket().getRemoteSocketAddress());
+							close("Request size " + receiveSize + " exceeds maximum limit of " + maxKafkaRequestSizeBytes);
+							return;
+						}
+
 						requestedBufferSize = receiveSize; // may be 0 for some payloads (SASL)
 						if (receiveSize == 0) {
 							buffer = EMPTY_BUFFER;
@@ -1561,7 +1574,7 @@ private boolean performTLSValidation() throws IOException {
                 log.warn("Non-TLS connection detected on TLS port from {} - contentType: 0x{}, version: {}.{}", 
                     transportLayer.socketChannel().socket().getRemoteSocketAddress(),
                     String.format("%02X", contentType), majorVersion, minorVersion);
-                return false;
+                throw new IOException("Plaintext traffic detected on TLS port - potential security risk or misconfiguration");
             }
             
             // Validation passed - prepare buffer for normal SSL processing
@@ -1572,7 +1585,8 @@ private boolean performTLSValidation() throws IOException {
         
 		} catch (IOException e) {
 			// Re-throw IOException for caller to handle
-			throw new IOException("TLS validation failed: " + e.getMessage(), e);
+			// throw new IOException("TLS validation failed: " + e.getMessage(), e);
+			throw e;
 		} catch (Exception e) {
 			// Convert other exceptions to IOException
 			throw new IOException("Unexpected error during TLS validation: " + e.getMessage(), e);

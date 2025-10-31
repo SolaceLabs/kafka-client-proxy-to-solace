@@ -47,9 +47,13 @@ public class ProxyConfig  extends AbstractConfig {
     public static final String PRODUCE_MESSAGE_MAX_BYTES_DOC = "Maximum allowed record size (bytes) that can be produced to a topic";
     public static final int DEFAULT_PRODUCE_MESSAGE_MAX_BYTES = 1_048_576;
 
-    private static final Pattern SECURITY_PROTOCOL_PATTERN = Pattern.compile("(.*)?://.*");
-
     private static final String PROXY_PROPERTY_PREFIX = "proxy.";
+
+    public static final String REQUEST_MAX_BYTES = PROXY_PROPERTY_PREFIX + "request.max.bytes";
+    public static final String REQUEST_MAX_BYTES_DOC = "Maximum size of a Kafka request that the proxy will accept. The limiting factor will be for Produce requests, including all records, headers, and metadata in a Record Bundle";
+    public static final int DEFAULT_REQUEST_MAX_BYTES = 1024 * 1024 * 10; // 10 MB
+
+    private static final Pattern SECURITY_PROTOCOL_PATTERN = Pattern.compile("(.*)?://.*");
 
     public static final String SEPARATOR_CONFIG = PROXY_PROPERTY_PREFIX + "separators";
     public static final String SEPARATOR_DOC = "A list of chars of typical Kafka topic separators that the Proxy will convert to Solace separator '/'";
@@ -381,6 +385,7 @@ public class ProxyConfig  extends AbstractConfig {
         CONFIG = new ConfigDef().define(LISTENERS_CONFIG, Type.LIST, Collections.emptyList(), new ConfigDef.NonNullValidator(), Importance.HIGH, LISTENERS_DOC)
                                 .define(ADVERTISED_LISTENERS_CONFIG, Type.LIST, Collections.emptyList(), new ConfigDef.NonNullValidator(), Importance.HIGH, ADVERTISED_LISTENERS_DOC) 
                                 .define(PRODUCE_MESSAGE_MAX_BYTES, Type.INT, DEFAULT_PRODUCE_MESSAGE_MAX_BYTES, new ConfigDef.NonNullValidator(), Importance.MEDIUM, PRODUCE_MESSAGE_MAX_BYTES_DOC)
+                                .define(REQUEST_MAX_BYTES, Type.INT, DEFAULT_REQUEST_MAX_BYTES, new ConfigDef.NonNullValidator(), Importance.MEDIUM, REQUEST_MAX_BYTES_DOC)
                                 .withClientSslSupport()
                                 .define(SEPARATOR_CONFIG, Type.STRING, "", new ConfigDef.NonNullValidator(), Importance.HIGH, SEPARATOR_DOC) 
                                 .define(REQUEST_HANDLER_THREADS_CONFIG, Type.INT, DEFAULT_REQUEST_HANDLER_THREADS, new ConfigDef.NonNullValidator(), Importance.HIGH, REQUEST_HANDLER_THREADS_DOC)
