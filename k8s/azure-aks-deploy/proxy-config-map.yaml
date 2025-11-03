@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: kafka-proxy-config
+  name: proxy-config
   namespace: kafka-proxy
   # AKS-specific: Add labels for better organization
   labels:
@@ -40,16 +40,16 @@ data:
     # ssl.keystore.type: ${env:KAFKA_KEYSTORE_TYPE:PKCS12}
     ssl.keystore.type: PKCS12
 
-    ssl.protocol: TLSv1.2
-    ssl.enabled.protocols: TLSv1.2
-    # ssl.enabled.protocols: TLSv1.2,TLSv1.3
+    ssl.protocol: TLSv1.3
+    # ssl.enabled.protocols: TLSv1.2
     # ssl.enabled.protocols: TLSv1.3
+    ssl.enabled.protocols: TLSv1.2,TLSv1.3
     ssl.protocol: TLS
     # ssl.cipher.suites: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 
     # Set to "none" to disable client authentication; Set to "required" to enforce client certs
+    # Set to true to use mTLS (connection only, mTLS authenticated client Id is not passed to Solace--pending feature)
     ssl.client.auth=none
-
     # ssl.truststore.location: path/to/truststore/trusted.jks
     # ssl.truststore.password: trusted
     # ssl.truststore.type: JKS
@@ -59,10 +59,11 @@ data:
     ##########################
     # solace.host:     ${env:SOLACE_HOST:tcps://localhost:55443}
     # solace.vpn_name: ${env:SOLACE_VPN_NAME:default}
-    solace.host:     tcps://mr-connection-2d92bwbumsi.messaging.solace.cloud:55443
+    solace.host:     tcps://mr-connection-MYSERVICE.messaging.solace.cloud:55443
     solace.vpn_name: kafka-wireline
-    solace.ssl.enabled.protocols: TLSv1.2
+    solace.ssl.enabled.protocols: TLSv1.3
 
+    # Use these settings if using a non-public/non-reachable CA for Solace broker certificate
     # solace.ssl.truststore.location: path/to/truststore/trusted.jks
     # solace.ssl.truststore.password: trusted
     # solace.ssl.truststore.type: JKS
@@ -70,9 +71,13 @@ data:
 
     ## PROXY-WIDE SETTINGS
     ##########################
+    # Health Check Server Settings
     proxy.healthcheckserver.create: true
     proxy.healthcheckserver.port: 8080
 
+    # Request Size Limits (to prevent OOM vulnerabilities)
+    proxy.max.request.size.bytes=104857600
+    
     ## PRODUCER SETTINGS
     ##########################
     proxy.separators: _.

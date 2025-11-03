@@ -458,10 +458,36 @@ The demo includes separate Java producer and consumer applications with their ow
 
 ### Health Endpoints
 
-When `proxy.healthcheckserver.create=true`:
+When `proxy.healthcheckserver.create=true`, the following endpoint is available:
 
-- **`/health`**: Overall proxy health status
-- **`/ready`**: Readiness for traffic (Kubernetes readiness probe)
+```bash
+# Health check endpoint - returns 200 OK when proxy is healthy
+curl http://proxy-host:8080/health
+
+# Response: HTTP 200 OK with "OK" body when healthy
+# Response: HTTP 503 Service Unavailable when unhealthy
+```
+
+**Kubernetes Health Check Configuration:**
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+  
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 2
+```
 
 ### Logging
 
@@ -850,4 +876,44 @@ proxy.partitions.per.topic=20
 - **No transactions**: Kafka transaction semantics not supported
 - **Consumer commits**: Mapped to Solace message acknowledgments
 
-This usage model allows existing Kafka applications to seamlessly publish and consume messages through Solace without any code changes, while taking advantage of Solace's hierarchical topics and flexible routing capabilities.
+## Security Features
+
+### Request Size Protection
+
+The proxy includes built-in protection against memory exhaustion attacks:
+
+```properties
+# Maximum request size limit (prevents OutOfMemoryError)
+proxy.max.request.size.bytes=104857600  # 100MB default
+
+# Automatic rejection of oversized requests
+# Logs security events for monitoring suspicious activity
+```
+
+### SSL/TLS Connection Validation
+
+- **Plaintext Detection**: Automatically detects and rejects plaintext traffic on SSL ports
+- **Protocol Validation**: Validates TLS handshake to prevent memory vulnerabilities  
+- **Connection Monitoring**: Logs suspicious connection attempts for security analysis
+- **Immediate Connection Termination**: Closes invalid connections to prevent resource exhaustion
+
+### Security Event Logging
+
+The proxy logs security-relevant events for monitoring:
+
+```log
+# Examples of security event logs:
+[SECURITY][Channel 1] OVERSIZED_REQUEST from /192.168.1.100:45123 - size=2147483647, limit=104857600
+[SECURITY][Channel 2] PLAINTEXT_ON_SSL_PORT from /10.0.1.50:33445 - detected non-TLS traffic on port 9094
+```
+
+### Production JVM Security Configuration
+
+```bash
+# Recommended production JVM settings for security and stability
+java -Xms512m -Xmx2g -XX:+UseG1GC \
+     -XX:MaxGCPauseMillis=200 \
+     -XX:+DisableExplicitGC \
+     -Djava.security.egd=file:/dev/./urandom \
+     -jar kafka-wireline-proxy-*.jar proxy.properties
+```

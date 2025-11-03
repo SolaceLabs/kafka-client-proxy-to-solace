@@ -16,7 +16,7 @@ metadata:
     service.beta.kubernetes.io/azure-load-balancer-health-probe-protocol: "HTTP"
     service.beta.kubernetes.io/azure-load-balancer-health-probe-port: "8080"
     service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: "/health"
-    service.beta.kubernetes.io/azure-load-balancer-health-probe-interval: "30"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-interval: "15"
     service.beta.kubernetes.io/azure-load-balancer-health-probe-num-of-probe: "2"
     
     # Azure Load Balancer SKU (Standard is recommended for production)
@@ -48,6 +48,10 @@ spec:
     - name: kafka-ssl
       port: 9094
       targetPort: 9094
+      protocol: TCP
+    - name: plaintext
+      port: 9092
+      targetPort: 9092
       protocol: TCP
   # Optional: Configure session affinity for sticky sessions
   # sessionAffinity: ClientIP

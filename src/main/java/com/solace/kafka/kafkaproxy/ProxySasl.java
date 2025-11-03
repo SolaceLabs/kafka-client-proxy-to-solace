@@ -11,7 +11,6 @@ import java.util.Arrays;
 
 import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.requests.RequestHeader;
 import org.apache.kafka.common.errors.InvalidRequestException;
 
 

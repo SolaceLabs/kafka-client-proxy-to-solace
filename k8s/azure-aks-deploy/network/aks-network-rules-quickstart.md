@@ -8,6 +8,13 @@ This QUICK START guide provides step-by-step instructions for creating Azure NSG
 - kubectl configured for your AKS cluster
 - Proper permissions to modify NSG rules
 
+## Required Ports
+The instructions and CRD files were created to use the following defined ports:
+
+- **9092** - Kafka PLAINTEXT protocol
+- **9094** - Kafka SASL_SSL protocol  
+- **8080** - Health check endpoint (internal only)
+
 ## 1. Create NSG Rules
 
 First, create the necessary Network Security Group rules to allow external traffic to the Kafka proxy:
@@ -29,7 +36,7 @@ Check if external IPs are assigned to your load balancer services:
 kubectl get svc -n kafka-proxy
 ```
 
-Expected output should show external IPs assigned:
+Expected output should show external IPs assigned (example):
 ```
 NAME                                TYPE           CLUSTER-IP    EXTERNAL-IP   PORT(S)
 kafka-wireline-proxy-bootstrap-lb   LoadBalancer   10.0.123.45   20.1.2.3      9094:30123/TCP
@@ -53,6 +60,14 @@ nc -zv $EXTERNAL_IP 9094
 
 # Test with timeout using bash
 timeout 10 bash -c "</dev/tcp/$EXTERNAL_IP/9094" && echo "Connected" || echo "Failed"
+```
+
+### Test Connectivity outside the Kubernetes Cluster
+
+```bash
+# Test from outside the cluster
+./test-connectivity.sh <external-ip> 9092
+./test-connectivity.sh <external-ip> 9094
 ```
 
 ### SSL Handshake Test
