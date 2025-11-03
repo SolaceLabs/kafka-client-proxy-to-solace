@@ -9,14 +9,14 @@ package com.solace.kafka.kafkaproxy;
 
 import java.util.Properties;
 import java.util.Base64;
-import java.util.UUID;
-import java.nio.ByteBuffer;
 import java.io.InputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.solace.kafka.kafkaproxy.util.ProxyUtils;
 
 public class ProxyMain {
 
@@ -28,12 +28,16 @@ public class ProxyMain {
     private HealthCheckServer healthCheckServer = null;
     
     public ProxyMain() {
-        UUID uuid = UUID.randomUUID();
-        byte[] src = ByteBuffer.wrap(new byte[16])
-                .putLong(uuid.getMostSignificantBits())
-                .putLong(uuid.getLeastSignificantBits())
-                .array();
-        this.clusterId = Base64.getUrlEncoder().encodeToString(src).substring(0, 22);
+        // UUID uuid = UUID.randomUUID();
+
+        byte[] clusterIdBytes = ProxyUtils.generateMDAsUuidV4AsBytes("This my CLUSTER");
+
+
+        // byte[] src = ByteBuffer.wrap(new byte[16])
+        //         .putLong(uuid.getMostSignificantBits())
+        //         .putLong(uuid.getLeastSignificantBits())
+        //         .array();
+        this.clusterId = Base64.getUrlEncoder().encodeToString(clusterIdBytes).substring(0, 22);
         log.debug("Cluster id: " + this.clusterId);
     }
     

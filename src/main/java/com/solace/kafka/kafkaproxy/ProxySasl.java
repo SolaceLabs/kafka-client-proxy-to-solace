@@ -77,9 +77,7 @@ public class ProxySasl {
     }
     
     // Some code taken from org.apache.kafka.common.security.plain.internals.PlainSaslServer.java
-    public ProxyPubSubPlusSession authenticate(
-               ProxyChannel.AuthorizationResult authResult, byte[] responseBytes) 
-               throws SaslAuthenticationException {
+    public ProxyPubSubPlusSession authenticate(ProxyChannel.AuthorizationResult authResult, byte[] responseBytes) throws SaslAuthenticationException {
         /*
          * Message format (from https://tools.ietf.org/html/rfc4616):
          *
@@ -122,9 +120,12 @@ public class ProxySasl {
         if ((password == null) || (password.length == 0)) {
             throw new SaslAuthenticationException("Authentication failed: password not specified");
         }    
-        ProxyPubSubPlusSession session =  
-            ProxyPubSubPlusClient.getInstance().connect(
-                   authResult, username, password);
+        // Create the AuthorizationResult needed by ProxyPubSubPlusClient.connect()
+        // ProxyChannel.AuthorizationResult authResult = new ProxyChannel.AuthorizationResult(channel, requestHeader);
+
+        // Call connect, but DO NOT queue the authResult.
+        ProxyPubSubPlusSession session = ProxyPubSubPlusClient.getInstance().connect(authResult, username, password);
+        
         // wipe out username and password
         Arrays.fill(username, (byte)0);
         Arrays.fill(password, (byte)0);

@@ -1,6 +1,6 @@
 # Sample Kafka Client Demo
 
-This guide demonstrates how to build and execute the embedded demo producer and consumer clients to test the Kafka Proxy for Solace PubSub+.
+This guide demonstrates how to build and execute the embedded demo producer and consumer clients to test the Kafka Proxy for Solace.
 
 ## Prerequisites
 
@@ -105,20 +105,26 @@ Open a new terminal and start the demo consumer:
 java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
      -c demo-consumer.properties \
      -g test-group \
-     -t test-topic
+     -t test-topic \
+     -l consumer-client-01 \
+     -m 100
 ```
 
 **Command Arguments:**
 - `-c demo-consumer.properties` - Consumer configuration file
 - `-g test-group` - Consumer group ID
 - `-t test-topic` - Kafka topic to subscribe to
+- `-l consumer-client-01` - Client ID for the consumer (optional)
+- `-p 500` - Poll timeout in milliseconds (optional, default: 500)
+- `-m 100` - Maximum records per poll (optional, default: 500)
 
 **Expected Output:**
 ```
-Demo Consumer starting...
-Subscribed to topic: test-topic
-Consumer group: test-group
-Waiting for messages...
+Demo Consumer starting with client ID: consumer-client-01
+Subscribed to topic: test-topic, Consumer group: test-group
+<-- key1       - The old house on the hill seemed to whisper secr [000001] P[00] N[1] C[cons-01]
+<-- key2       - A gentle breeze rustled through the tall grass c [000002] P[01] N[1] C[cons-01]
+<-- key3       - Ancient forest stood as silent guardian watching  [000003] P[02] N[1] C[cons-01]
 ```
 
 ### Start Demo Producer
@@ -128,31 +134,30 @@ Open another terminal and start the demo producer:
 ```bash
 # Run the demo producer from its own JAR
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
-     --config demo-producer.properties \
-     --topic PRODUCER_TOPIC:test-topic \
-     --input-file getting-started/test-data/publish-data-kv-10-fixed.txt \
-     --num-records 10 \
-     --delay 5
+     -c demo-producer.properties \
+     -t PRODUCER_TOPIC:test-topic \
+     -i getting-started/test-data/publish-data-kv-10-fixed.txt \
+     -n 10 \
+     -d 1000 \
+     -l producer-client-01
 ```
 
 **Command Arguments:**
-- `--config demo-producer.properties` - Producer configuration file
-- `--topic PRODUCER_TOPIC:test-topic` - Kafka topic to publish to (note the PRODUCER_TOPIC prefix)
-- `--input-file getting-started/test-data/publish-data-kv-10-fixed.txt` - Test Data File containing records with 10 unique Keys
-- `--num-records 10` - Number of messages to send
-- `--delay 5` - Delay in milliseconds between requests to publish messages (can be 0)
+- `-c demo-producer.properties` - Producer configuration file
+- `-t PRODUCER_TOPIC:test-topic` - Kafka topic to publish to (note the PRODUCER_TOPIC prefix)
+- `-i getting-started/test-data/publish-data-kv-10-fixed.txt` - Test data file containing key-value pairs
+- `-n 10` - Number of messages to send  
+- `-d 1000` - Delay in milliseconds between messages (optional, default: 0)
+- `-l producer-client-01` - Client ID for the producer (optional)
 
 **Expected Output:**
 ```log
-...
-INFO  - Starting to send messages to topic 'PRODUCER_TOPIC:ORDER_CHANGES'. Press Ctrl+C to exit.
-...
-INFO  - SENT 0000000000 : The old house on the hill seemed to whisper secrets to the passing travelers
-INFO  - SENT 1111111111 : A gentle breeze rustled through the tall grass creating a soothing melody
-INFO  - SENT 2222222222 : Ancient forest stood as a silent guardian watching over the sleeping valley
-...
-INFO  - SENT 8888888888 : Train rumbled along the tracks carrying passengers to their unknown destinations
-INFO  - SENT 9999999999 : The chef prepared a delicious meal the aroma filling the entire restaurant
+INFO  - Starting to send messages to topic 'PRODUCER_TOPIC:test-topic'. Press Ctrl+C to exit.
+INFO  - Using client ID: producer-client-01
+--> key1       - The old house on the hill seemed to whisper secr [000001] N[1] C[prod-01 ]
+--> key2       - A gentle breeze rustled through the tall grass c [000002] N[1] C[prod-01 ]
+--> key3       - Ancient forest stood as silent guardian watching  [000003] N[1] C[prod-01 ]
+INFO  - Target number of records (10) has been sent.
 ```
 
 ### Verify Message Delivery
@@ -316,19 +321,21 @@ java -jar demo-producer/target/kafka-demo-producer-*.jar \
 
 ```bash
 java -jar demo-producer/target/kafka-demo-producer-*.jar \
-     --config <config-file> \
-     --topic PRODUCER_TOPIC:<topic-name> \
-     --num-records <message-count> \
-     [--input-file <input-file>] \
-     [-d <delay-millis>]
+     -c <config-file> \
+     -t <topic-name> \
+     -i <input-file> \
+     -n <message-count> \
+     [-d <delay-millis>] \
+     [-l <client-id>]
 ```
 
 **Parameters:**
-- `-c | --config      <config-file>` - Producer properties file
-- `-t | --topic       PRODUCER_TOPIC:<topic-name>` - Target Kafka topic (PRODUCER_TOPIC prefix required)
-- `-n | --num-records <message-count>` - Number of messages to send
-- `-i | --input-file  <input-file>` - Optional: Custom input file for message content
-- `-d | --delay       <delay-millis>` - Optional: Delay between messages in milliseconds
+- `-c <config-file>` - Producer properties file (required)
+- `-t <topic-name>` - Target Kafka topic (required, use PRODUCER_TOPIC: prefix)
+- `-i <input-file>` - Input file containing key-value pairs (required)
+- `-n <message-count>` - Number of messages to send (required)
+- `-d <delay-millis>` - Delay between messages in milliseconds (optional, default: 0)
+- `-l <client-id>` - Kafka client ID for the producer (optional)
 
 ### DemoConsumer Usage
 
@@ -336,78 +343,43 @@ java -jar demo-producer/target/kafka-demo-producer-*.jar \
 java -jar demo-consumer/target/kafka-demo-consumer-*.jar \
      -c <config-file> \
      -g <group-id> \
-     -t <topic-name>
+     -t <topic-name> \
+     [-p <poll-time-ms>] \
+     [-l <client-id>] \
+     [-m <max-poll-records>]
 ```
 
 **Parameters:**
-- `-c <config-file>` - Consumer properties file
-- `-g <group-id>` - Consumer group identifier
-- `-t <topic-name>` - Kafka topic to subscribe to
+- `-c <config-file>` - Consumer properties file (required)
+- `-g <group-id>` - Consumer group identifier (required)
+- `-t <topic-name>` - Kafka topic to subscribe to (required)
+- `-p <poll-time-ms>` - Poll timeout in milliseconds (optional, default: 500)
+- `-l <client-id>` - Kafka client ID for the consumer (optional)
+- `-m <max-poll-records>` - Maximum records returned per poll (optional, default: 500)
 
-### Demo Client Debugging
+## Understanding Output Format
 
-Enable debug logging by adding JVM arguments:
-
-```bash
-java -Dlog4j.configurationFile=log4j2.xml \
-     -Dlog4j2.logger.com.solace.kafka.kafkaproxy.demo.level=DEBUG \
-     -jar demo-producer/target/kafka-demo-producer-*.jar \
-     --config demo-producer.properties \
-     --topic PRODUCER_TOPIC:test-topic \
-     --num-records 10
+### Producer Output Format
+```
+--> <key>      - <value>                                      [<count>] N[<node>] C[<client>]
 ```
 
-## Troubleshooting
+- `-->` - Indicates outgoing message from producer
+- `<key>` - Message key (padded to 10 characters)
+- `<value>` - Message value (truncated to 50 characters)
+- `[<count>]` - Message sequence number (6 digits)
+- `N[<node>]` - Kafka broker node ID
+- `C[<client>]` - Client ID (truncated to 8 characters)
 
-### Connection Issues
-
-```bash
-# Test proxy health
-curl http://localhost:8080/health
-
-# Check proxy logs for connection errors
-tail -f proxy.log
+### Consumer Output Format
+```
+<-- <key>      - <value>                                      [<offset>] P[<part>] N[<node>] C[<client>]
 ```
 
-### Authentication Failures
-
-1. **Verify Solace credentials** in the JAAS configuration
-2. **Check Message VPN permissions** on the Solace broker
-3. **Validate proxy configuration** for Solace connection
-
-### SSL Certificate Issues
-
-```bash
-# Test SSL connection manually
-openssl s_client -connect localhost:9094 -servername localhost
-
-# Verify certificate in keystore
-keytool -list -v -keystore /path/to/keystore.pkcs12 -storetype PKCS12
-```
-
-## Monitoring
-
-### Check Message Flow
-
-1. **Proxy Logs** - Monitor for connection and message processing
-2. **Solace Broker** - Check queue statistics and message rates
-3. **Demo Client Output** - Verify send/receive confirmations
-
-### Health Endpoints
-
-```bash
-# Proxy health status
-curl http://localhost:8080/health
-
-# Readiness check
-curl http://localhost:8080/ready
-```
-
-## Next Steps
-
-1. **Custom Applications** - Use the demo clients as reference for your own Kafka applications
-2. **Production Configuration** - Review SSL certificates and security settings
-3. **Performance Tuning** - Adjust thread pools and batch sizes based on demo results
-4. **Kubernetes Deployment** - Use the AWS EKS deployment guide for production
-
-For production deployment, see the [AWS EKS Deployment Guide](../k8s/aws-eks-deploy/aws-eks-instructions.md).
+- `<--` - Indicates incoming message to consumer
+- `<key>` - Message key (padded to 10 characters)
+- `<value>` - Message value (truncated to 50 characters)  
+- `[<offset>]` - Message offset in partition
+- `P[<part>]` - Partition number (2 digits)
+- `N[<node>]` - Kafka broker node ID
+- `C[<client>]` - Consumer client ID (truncated to 8 characters)

@@ -4,12 +4,12 @@
  
   <groupId>com.solace.kafkawireline</groupId>
   <artifactId>kafka-wireline-proxy</artifactId>
-  <version>0.1.1</version>
+  <version>0.1.2</version>
   <packaging>jar</packaging>
 
-  <name>Kafka Wireline Proxy</name>
+  <name>Kafka Wireline Proxy for Solace</name>
   <description>
-    Kafka Wireline Proxy for Solace Platform
+    Kafka Wireline Proxy for Solace
     This project defines a deployable proxy that enables Kafka producers 
     and consumers to publish to Solace topics and subscribe to Solace queues.
   </description>

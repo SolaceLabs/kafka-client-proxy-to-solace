@@ -1,0 +1,67 @@
+---
+# LoadBalancer Service for Kafka Wireline Proxy -- Bootstrap Service
+# This load balancer host/address should be used by clients as the bootstrap server
+# It will round-robin to any running pod in the proxy StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-wireline-proxy-bootstrap-lb
+  namespace: kafka-proxy
+  annotations:
+    # Azure Load Balancer annotations (replacing AWS ELB annotations)
+    service.beta.kubernetes.io/azure-load-balancer-internal: "false"  # External load balancer
+    service.beta.kubernetes.io/azure-load-balancer-tcp-idle-timeout: "30"
+    
+    # Health probe configuration (equivalent to AWS health checks)
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-protocol: "HTTP"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-port: "8080"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: "/health"
+<<<<<<< HEAD
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-interval: "15"
+=======
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-interval: "30"
+>>>>>>> origin/beta-fixes-and-enhancements-1
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-num-of-probe: "2"
+    
+    # Azure Load Balancer SKU (Standard is recommended for production)
+    service.beta.kubernetes.io/azure-load-balancer-mode: "shared"  # or "auto" for Standard SKU
+    
+    # Optional: Specify resource group for load balancer (if different from cluster RG)
+    # service.beta.kubernetes.io/azure-load-balancer-resource-group: "your-lb-resource-group"
+    
+    # Optional: Azure Load Balancer subnet (for internal LBs)
+    # service.beta.kubernetes.io/azure-load-balancer-internal-subnet: "your-subnet-name"
+    
+    # Optional: Static IP allocation (if you have a reserved public IP)
+    # service.beta.kubernetes.io/azure-load-balancer-ipv4: "your-static-ip"
+    
+    # Session affinity configuration (equivalent to cross-zone load balancing)
+    service.beta.kubernetes.io/azure-load-balancer-enable-high-availability-ports: "false"
+    
+spec:
+  type: LoadBalancer
+  # Important: Set externalTrafficPolicy to Local
+  externalTrafficPolicy: Local
+  selector:
+    app: kafka-wireline-proxy
+  ports:
+    # - Bootstrap ports (round-robin to any pod via regular service)
+    # - For externally facing load balancer, these should be secure ports only
+    #   or security policy should be applied to restrict access via NSG
+    # - Ports should match to ports in the StatefulSet
+    - name: kafka-ssl
+      port: 9094
+      targetPort: 9094
+      protocol: TCP
+<<<<<<< HEAD
+    - name: plaintext
+      port: 9092
+      targetPort: 9092
+      protocol: TCP
+=======
+>>>>>>> origin/beta-fixes-and-enhancements-1
+  # Optional: Configure session affinity for sticky sessions
+  # sessionAffinity: ClientIP
+  # sessionAffinityConfig:
+  #   clientIP:
+  #     timeoutSeconds: 10800

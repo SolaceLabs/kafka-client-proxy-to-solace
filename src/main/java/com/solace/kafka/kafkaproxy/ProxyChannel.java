@@ -83,6 +83,7 @@ import com.solace.kafka.kafkaproxy.util.OpConstants;
 import com.solace.kafka.kafkaproxy.util.ProxyUtils;
 
 public class ProxyChannel {
+
 	private static final Logger log = LoggerFactory.getLogger(ProxyChannel.class);
 	private final Queue<Send> sendQueue;
 	private final TransportLayer transportLayer;
@@ -106,6 +107,7 @@ public class ProxyChannel {
 	private final int maxProduceMessageBytes;
 	private boolean consumerMetadataChannel = false;
 	private boolean sessionClosed = false;
+	private int maxKafkaRequestSizeBytes = 0;
 
 	private static int channelIdGenerator = 0;
 	private int channelId = channelIdGenerator++;
@@ -182,7 +184,7 @@ public class ProxyChannel {
 		}
 	}
 
-	final static class AuthorizationResult extends ProxyReactor.WorkEntry {
+	static class AuthorizationResult extends ProxyReactor.WorkEntry {
 		private final RequestHeader requestHeader;
 		private final boolean worked;
 
@@ -217,8 +219,24 @@ public class ProxyChannel {
 		}
 	}
 
-	// Add this inner class to ProxyChannel.java
-	final static class FetchResponseResult extends ProxyReactor.WorkEntry {
+    /**
+     * A special AuthorizationResult that does nothing when addToWorkQueue is called.
+     * This is used to pass context to legacy methods that might try to queue a result,
+     * preventing them from doing so in the new asynchronous flow.
+     */
+    final static class DetachedAuthorizationResult extends AuthorizationResult {
+        public DetachedAuthorizationResult(ProxyChannel proxyChannel, RequestHeader requestHeader) {
+            super(proxyChannel, requestHeader);
+        }
+
+        @Override
+        public void addToWorkQueue() {
+            // DO NOTHING. This prevents the legacy flow from queuing a duplicate work entry.
+        }
+    }
+
+    // Add this inner class to ProxyChannel.java
+    final static class FetchResponseResult extends ProxyReactor.WorkEntry {
 	    private final AbstractResponse response;
 	    private final RequestHeader requestHeader;
 	    private final ApiKeys apiKey = ApiKeys.FETCH;
@@ -272,7 +290,34 @@ public class ProxyChannel {
 	    }
 	}
 	
-	final static class Close extends ProxyReactor.WorkEntry {
+	final static class SaslAuthenticateResponseResult extends ProxyReactor.WorkEntry {
+        private final RequestHeader requestHeader;
+        private final ApiKeys apiKey = ApiKeys.SASL_AUTHENTICATE;
+        private final boolean worked;
+        private final Exception exception;
+        private final ProxyPubSubPlusSession session;
+
+        public SaslAuthenticateResponseResult(ProxyChannel proxyChannel, RequestHeader requestHeader, boolean worked, Exception exception, ProxyPubSubPlusSession session) {
+            super(proxyChannel);
+            this.requestHeader = requestHeader;
+            this.worked = worked;
+            this.exception = exception;
+            this.session = session;
+        }
+
+        public RequestHeader getRequestHeader() { return requestHeader; }
+        public ApiKeys getApiKey() { return apiKey; }
+        public boolean getWorked() { return worked; }
+        public Exception getException() { return exception; }
+        public ProxyPubSubPlusSession getSession() { return session; }
+
+        @Override
+        public String toString() {
+            return "SaslAuthenticateResponseResult{requestHeaderCorId=" + (requestHeader != null ? requestHeader.correlationId() : "null") + ", worked=" + worked + ", exception=" + (exception != null ? exception.getMessage() : "null") + "}";
+        }
+    }
+    
+    final static class Close extends ProxyReactor.WorkEntry {
 		private final String reason;
 
 		public Close(ProxyChannel proxyChannel, String reason) {
@@ -345,7 +390,8 @@ public class ProxyChannel {
 		enableKafkaSaslAuthenticateHeaders = false;
 		produceResponseProcesssing = new ProxyChannel.ProduceResponseProcessing();
 		listenPort.addChannel(this);
-		maxProduceMessageBytes = ProxyConfig.getInstance().getInt(ProxyConfig.PRODUCE_MESSAGE_MAX_BYTES);
+		this.maxProduceMessageBytes = ProxyConfig.getInstance().getInt(ProxyConfig.PRODUCE_MESSAGE_MAX_BYTES);
+		this.maxKafkaRequestSizeBytes = ProxyConfig.getInstance().getInt(ProxyConfig.REQUEST_MAX_BYTES);
 		sendQueue = new LinkedList<Send>();
 
         this.validationBuffer = ByteBuffer.allocate(16);
@@ -456,25 +502,43 @@ public class ProxyChannel {
             // }
 			proxySasl.adjustState(apiKey);
 		} else {
-            log.debug("Received SASL authentication request without Kafka header (remote " + 
+            log.debug("Received SASL authentication request without Kafka header (remote " +
                       transportLayer.socketChannel().socket().getRemoteSocketAddress()
                       + ")");
-			byte[] clientToken = new byte[buffer.remaining()];
-			buffer.get(clientToken, 0, clientToken.length);
-			ProxyChannel.AuthorizationResult authResult = new ProxyChannel.AuthorizationResult(this, null);
+            final byte[] clientToken = new byte[buffer.remaining()];
+            buffer.get(clientToken, 0, clientToken.length);
+
             inFlightRequestCount++;
-			try {
-				session = proxySasl.authenticate(authResult, clientToken);
-				// authorizationResult(null, true);				// This will report success before authentication completes
-			} catch (Exception e) {
-				inFlightRequestCount--; // Decrement since the async operation could not be started
-				log.info("Sasl authentication failed: " + e);
-				authorizationResult(null, false);
-			}
-			return false;
-		}
-        
-		short apiVersion = header.apiVersion();
+            log.trace("[Channel {}] Offloading RAW SASL_AUTHENTICATE request to executor. In-flight: {}",
+                      this.channelId, inFlightRequestCount);
+
+            ProxyReactor.getRequestHandlerExecutor().submit(() -> {
+                Exception taskException = null;
+                boolean taskWorked = false;
+                ProxyPubSubPlusSession newSession = null;
+                try {
+                    // This is the blocking call, now running in a background thread.
+                    // Create a DetachedAuthorizationResult to prevent the legacy authenticate method
+                    // from queuing a duplicate work entry. The RequestHeader is null for this flow.
+                    DetachedAuthorizationResult detachedAuthResult = new DetachedAuthorizationResult(this, null);
+                    newSession = proxySasl.authenticate(detachedAuthResult, clientToken);
+                    taskWorked = true;
+                    log.debug("[Channel {}] RAW SASL authentication succeeded in background", this.channelId);
+                } catch (Exception e) {
+                    log.warn("[Channel {}] RAW SASL authentication failed in background: {}", this.channelId, e.getMessage(), e);
+                    taskException = e;
+                } finally {
+                    // Create the primary result object and queue it for the reactor thread to process.
+                    // The requestHeader is null for this flow.
+                    SaslAuthenticateResponseResult result = new SaslAuthenticateResponseResult(
+                        this, null, taskWorked, taskException, newSession);
+                    result.addToWorkQueue();
+                }
+            });
+            return false;
+        }
+
+        short apiVersion = header.apiVersion();
 		RequestAndSize requestAndSize;
 		if (apiKey == API_VERSIONS && !API_VERSIONS.isVersionSupported(apiVersion)) {
 			// TODO: Figure out why this did not work for request from Kafka client v3.9
@@ -694,18 +758,24 @@ public class ProxyChannel {
 						dataToSend(send, apiKey);
 						break;
 					}
-
-					if (kafkaApiConsumerTools == null) {
-						log.error("[Channel {}] KafkaApiConsumerTools is null for FETCH request -- likely consumer reconnecting", this.channelId);
-						log.debug("On consumer reconnect, we will tell the consumer that the session is bad to force group rejoin");
-						// Send a bad session response to the consumer
-						final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
-						AbstractResponse fetchResponseInvalidSession = KafkaApiConsumerTools.createFetchResponseInvalidSessionId(fetchRequest, requestHeader);
-						Send send = fetchResponseInvalidSession.toSend(requestHeader.toResponseHeader(), version);
-						dataToSend(send, apiKey);
-						break;
-					}
 				}
+				// 	if (kafkaApiConsumerTools == null) {
+				// 		// This can happen if the consumer is reconnecting and has not yet re-joined the group
+
+				// 		log.debug("HA TEST: ProxyChannel.handleRequest FETCH -- kafkaApiConsumerTools is null for FETCH request");
+
+				// 		log.warn("[Channel {}] KafkaApiConsumerTools is null for FETCH request -- likely consumer reconnecting", this.channelId);
+				// 		log.debug("On consumer reconnect, we will tell the consumer that the session is bad to force group rejoin");
+
+				// 		// Send a bad session response to the consumer (or unknown server error)
+				// 		final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
+				// 		AbstractResponse fetchResponseInvalidSession = KafkaApiConsumerTools.createFetchResponseNoGroupCoordinator(fetchRequest, requestHeader);
+
+				// 		// Send send = fetchResponseInvalidSession.toSend(requestHeader.toResponseHeader(), version);
+				// 		// dataToSend(send, apiKey);
+				// 		// break;
+				// 	}
+				// }
 
 				final FetchRequest fetchRequest = (FetchRequest) requestAndSize.request;
                 final RequestHeader originalRequestHeader = requestHeader; // Capture for lambda/runnable
@@ -719,7 +789,15 @@ public class ProxyChannel {
                     boolean taskWorked = false;
                     try {
                         // This is the blocking call
-                        taskResponse = kafkaApiConsumerTools.createFetchChannelResponseWithLock(fetchRequest, originalRequestHeader);
+						if (kafkaApiConsumerTools != null) {
+							taskResponse = kafkaApiConsumerTools.createFetchChannelResponseWithLock(fetchRequest, originalRequestHeader);
+						} else {
+							// This can happen if the consumer is reconnecting and has not yet re-joined the group
+							// Call static method to create a response that indicates bad session
+							log.debug("HA TEST: ProxyChannel.FETCH async task -- kafkaApiConsumerTools is null for FETCH request");
+							log.warn("[Channel {}] KafkaApiConsumerTools is null for FETCH request -- likely consumer reconnecting", this.channelId);
+							taskResponse = KafkaApiConsumerTools.createFetchResponseNoGroupCoordinator(fetchRequest, originalRequestHeader);
+						}
                         taskWorked = true;
                     } catch (Exception e) {
                         log.error("[Channel {}] Exception in async FETCH processing (CorrId: {}): {}", this.channelId, originalRequestHeader.correlationId(), e.getMessage(), e);
@@ -772,10 +850,25 @@ public class ProxyChannel {
 				// METADATA Channel
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
 
-                MetadataRequest metadataRequest = (MetadataRequest) requestAndSize.request; // Safe cast after parseRequest
-                MetadataRequestData data = metadataRequest.data();
+                final MetadataRequest metadataRequest = (MetadataRequest) requestAndSize.request; // Safe cast after parseRequest
+                final MetadataRequestData data = metadataRequest.data();
 
-				if (data.topics().size() != 1) {
+
+				log.debug("###RECONNECT### ProxyChannel.handleRequest METADATA -- clientId: {} -- kafkaApiConsumerTools: {}",
+					requestHeader.clientId(),
+					(kafkaApiConsumerTools == null ? "null" : "not null"));
+
+
+				if (data.topics().size() == 0) {
+					// Return broker metadata only
+					final AbstractResponse metadataResponse = new MetadataResponse(
+							new MetadataResponseData().setThrottleTimeMs(0).setBrokers(ProxyConfig.isHaTuple() ? ProxyConfig.getPortToMetadataResponse().get(listenPort.brokers().iterator().next().port()) : listenPort.brokers())
+									.setClusterId(listenPort.clusterId()).setControllerId(ProxyConfig.getNodeId()).setTopics(new MetadataResponseData.MetadataResponseTopicCollection()),
+							version);
+	                Send send = metadataResponse.toSend(requestHeader.toResponseHeader(), version);
+	                dataToSend(send, apiKey);
+					break;
+				} else if (data.topics().size() != 1) {
 					log.error("Received {} request with topic count == {}, must == 1", apiKey.name(), data.topics().size());
 					Send send = requestAndSize.request.getErrorResponse(0, new InvalidRequestException("Received {} request with invalid topic count, must == 1")).toSend(requestHeader.toResponseHeader(), version);
 					dataToSend(send, apiKey);
@@ -795,8 +888,8 @@ public class ProxyChannel {
 					metadataResponse = KafkaApiConsumerTools.createMetadataResponse(metadataRequest, requestHeader, listenPort);
 				} else {
 					MetadataResponseData.MetadataResponsePartition partitionMetadata = new MetadataResponseData.MetadataResponsePartition()
-							.setPartitionIndex(0).setErrorCode(Errors.NONE.code()).setLeaderEpoch(OpConstants.LEADER_EPOCH).setLeaderId(OpConstants.LEADER_ID_TOPIC_PARTITION)
-							.setReplicaNodes(Arrays.asList(0)).setIsrNodes(Arrays.asList(0))
+							.setPartitionIndex(0).setErrorCode(Errors.NONE.code()).setLeaderEpoch(OpConstants.LEADER_EPOCH).setLeaderId(ProxyConfig.getNodeId())
+							.setReplicaNodes(Arrays.asList(ProxyConfig.getNodeId())).setIsrNodes(Arrays.asList(ProxyConfig.getNodeId()))
 							.setOfflineReplicas(Collections.emptyList());
 					List<MetadataResponseData.MetadataResponsePartition> partitionList = Collections.singletonList(partitionMetadata);
 					MetadataResponseData.MetadataResponseTopicCollection topics = new MetadataResponseData.MetadataResponseTopicCollection();
@@ -808,10 +901,14 @@ public class ProxyChannel {
 								.setIsInternal(false);
 						topics.add(topicMetadata);
 					}
+
+					// TODO: SET CONTROLLER TO PROXY ORDINAL FOR KUBERNETES
+
 					metadataResponse = new MetadataResponse(
-							new MetadataResponseData().setThrottleTimeMs(0).setBrokers(listenPort.brokers())
-									.setClusterId(listenPort.clusterId()).setControllerId(0).setTopics(topics),
+							new MetadataResponseData().setThrottleTimeMs(0).setBrokers(ProxyConfig.isHaTuple() ? ProxyConfig.getPortToMetadataResponse().get(listenPort.brokers().iterator().next().port()): listenPort.brokers())
+									.setClusterId(listenPort.clusterId()).setControllerId(ProxyConfig.getNodeId()).setTopics(topics),
 							version);
+					// log.debug("MetadataResponse: {}", metadataResponse);
 				}
                 Send send = metadataResponse.toSend(requestHeader.toResponseHeader(), version);
                 dataToSend(send, apiKey);
@@ -826,15 +923,19 @@ public class ProxyChannel {
                 final OffsetCommitRequest offsetCommitRequest = (OffsetCommitRequest) requestAndSize.request;
                 final RequestHeader originalRequestHeader = requestHeader; // Capture for lambda
 
-                if (kafkaApiConsumerTools == null) {
-					// TODO: Test if this condition works as desired
-					// If OffsetCommit is received on this channel and consumerTools is null, then return a response
-					// indicating UNKNOWN_MEMBER_ID - which indicates that the consumer must re-join the group
-					AbstractResponse response = KafkaApiConsumerTools.createOffsetCommitResponseRebalancing(null, requestHeader);
-                    Send send = response.toSend(requestHeader.toResponseHeader(), version);
-					dataToSend(send, apiKey);
-                    break;
-                }
+				// moved this block into the async task
+                // if (kafkaApiConsumerTools == null) {
+
+				// 	log.debug("HA TEST: ProxyChannel.handleRequest OFFSET_COMMIT -- kafkaApiConsumerTools is null");
+
+				// 	// TODO: Test if this condition works as desired
+				// 	// If OffsetCommit is received on this channel and consumerTools is null, then return a response
+				// 	// indicating UNKNOWN_MEMBER_ID - which indicates that the consumer must re-join the group
+				// 	AbstractResponse response = KafkaApiConsumerTools.createOffsetCommitResponseRebalancing(null, requestHeader);
+                //     Send send = response.toSend(requestHeader.toResponseHeader(), version);
+				// 	dataToSend(send, apiKey);
+                //     break;
+                // }
 
                 inFlightRequestCount++;
                 log.trace("[Channel {}] Offloading OFFSET_COMMIT request (CorrId: {}) to executor. In-flight: {}", this.channelId, originalRequestHeader.correlationId(), inFlightRequestCount);
@@ -844,7 +945,16 @@ public class ProxyChannel {
                     Exception taskException = null;
                     boolean taskWorked = false;
                     try {
-                        taskResponse = kafkaApiConsumerTools.createOffsetCommitResponse(offsetCommitRequest, originalRequestHeader);
+						if (kafkaApiConsumerTools != null) {
+							// happy path
+                        	taskResponse = kafkaApiConsumerTools.createOffsetCommitResponse(offsetCommitRequest, originalRequestHeader);
+						} else {
+							// This can happen if the consumer is reconnecting and has not yet re-joined the group
+							// which is required to subscribe to the solace queue
+							log.debug("HA TEST: ProxyChannel.OFFSET_COMMIT async task -- kafkaApiConsumerTools is null");
+							log.warn("[Channel {}] KafkaApiConsumerTools is null for OFFSET_COMMIT request -- likely consumer reconnecting", this.channelId);
+							taskResponse = KafkaApiConsumerTools.createOffsetCommitResponseReconnect(offsetCommitRequest, originalRequestHeader);
+						}
                         taskWorked = true;
                     } catch (Exception e) {
                         log.error("[Channel {}] Exception in async OFFSET_COMMIT processing (CorrId: {}): {}", this.channelId, originalRequestHeader.correlationId(), e.getMessage(), e);
@@ -926,17 +1036,25 @@ public class ProxyChannel {
             case HEARTBEAT: {
 				// ApiKey=12
 				// GROUP channel
+
+
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
+				HeartbeatRequest heartbeatRequest = (HeartbeatRequest) requestAndSize.request; // Safe cast after parseRequest
+
 				if (kafkaApiConsumerTools == null) {
+
+
+					log.debug("HA TEST: ProxyChannel.handleRequest HEARTBEAT -- kafkaApiConsumerTools is null");
+
+
 					// TODO: Test if this step works as desired
 					// If a heartbeat request is received and consumerTools is null, then the client will receive a notice
 					// that the Kafka cluster is rebalancing and should then rejoin the consumer group
-					AbstractResponse response = KafkaApiConsumerTools.createHeartbeatResponseRebalancing();
+					AbstractResponse response = KafkaApiConsumerTools.createHeartbeatResponseRebalancing(heartbeatRequest, requestHeader);
 					Send send = response.toSend(requestHeader.toResponseHeader(), version);
 					dataToSend(send, apiKey);
 					break;
 				}
-				HeartbeatRequest heartbeatRequest = (HeartbeatRequest) requestAndSize.request; // Safe cast after parseRequest
 				AbstractResponse heartbeatResponse = kafkaApiConsumerTools.createHeartbeatResponse(heartbeatRequest, requestHeader);
 				Send send = heartbeatResponse.toSend(requestHeader.toResponseHeader(), version);
 				dataToSend(send, apiKey);
@@ -950,6 +1068,16 @@ public class ProxyChannel {
                 if (inFlightRequestCount > 0) return delayRequest(requestAndSize, requestHeader);
 				
 				LeaveGroupRequest leaveGroupRequest = (LeaveGroupRequest) requestAndSize.request; // Safe cast after parseRequest
+
+				if (kafkaApiConsumerTools == null) {
+					// This can happen if the consumer is reconnecting and has not yet re-joined the group for some Kafka API versions
+					log.debug("HA TEST: ProxyChannel.handleRequest LEAVE_GROUP -- kafkaApiConsumerTools is null");
+					AbstractResponse leaveGroupResponse = KafkaApiConsumerTools.createLeaveGroupResponseNoGroupCoordinator(leaveGroupRequest, requestHeader);
+					Send send = leaveGroupResponse.toSend(requestHeader.toResponseHeader(), version);
+					dataToSend(send, apiKey);
+					break;
+				}
+
 				AbstractResponse leaveGroupResponse = kafkaApiConsumerTools.createLeaveGroupResponse(leaveGroupRequest, requestHeader);
 				Send send = leaveGroupResponse.toSend(requestHeader.toResponseHeader(), version);
 				dataToSend(send, apiKey);
@@ -1053,21 +1181,43 @@ public class ProxyChannel {
             	break;
 			}
             case SASL_AUTHENTICATE: {
-				// ApiKey=36
-				// All Channels
-                SaslAuthenticateRequest saslAuthenticateRequest = (SaslAuthenticateRequest) requestAndSize.request; // Safe cast after parseRequest
-                ProxyChannel.AuthorizationResult authResult = new ProxyChannel.AuthorizationResult(this, requestHeader);
-                inFlightRequestCount++;
-                try {
-					// Stop flow gracefully if it is running as the next step will replace it (should not happen)
-                    session = proxySasl.authenticate(authResult, saslAuthenticateRequest.data().authBytes());
-                } catch (Exception e) {
-                    inFlightRequestCount--; // Decrement since the async operation could not be started
-                    log.info("Sasl authentication failed: " + e);
-                    authorizationResult(requestHeader, false);
-                }
+                // ApiKey=36
+                // All Channels - Now non-blocking
+                final SaslAuthenticateRequest saslAuthenticateRequest = (SaslAuthenticateRequest) requestAndSize.request;
+                final RequestHeader originalRequestHeader = requestHeader;
+                final byte[] authBytes = saslAuthenticateRequest.data().authBytes();
 
-                return false; // we are either waiting for authentication or could not even try to connect
+                inFlightRequestCount++;
+                log.trace("[Channel {}] Offloading SASL_AUTHENTICATE request (CorrId: {}) to executor. In-flight: {}",
+                          this.channelId, originalRequestHeader.correlationId(), inFlightRequestCount);
+
+                ProxyReactor.getRequestHandlerExecutor().submit(() -> {
+                    Exception taskException = null;
+                    boolean taskWorked = false;
+                    ProxyPubSubPlusSession newSession = null;
+                    try {
+                        // This is the blocking call, now running in a background thread.
+                        // We create a DETACHED AuthorizationResult to prevent the legacy authenticate method
+                        // from queuing a duplicate work entry.
+                        DetachedAuthorizationResult detachedAuthResult = new DetachedAuthorizationResult(this, originalRequestHeader);
+                        newSession = proxySasl.authenticate(detachedAuthResult, authBytes);
+                        taskWorked = true;
+                        log.debug("[Channel {}] SASL authentication succeeded in background (CorrId: {})",
+                                 this.channelId, originalRequestHeader.correlationId());
+                    } catch (Exception e) {
+                        log.warn("[Channel {}] SASL authentication failed in background (CorrId: {}): {}",
+                                this.channelId, originalRequestHeader.correlationId(), e.getMessage(), e);
+                        taskException = e;
+                    } finally {
+                        // Create the primary result object and queue it for the reactor thread to process.
+                        // This is the ONLY work entry that should be queued for this operation.
+                        SaslAuthenticateResponseResult result = new SaslAuthenticateResponseResult(
+                            this, originalRequestHeader, taskWorked, taskException, newSession);
+                        result.addToWorkQueue();
+                    }
+                });
+
+                return false; // Stop reading from channel, wait for async result.
             }
             default: {
                 log.error("Unhanded request type: " + apiKey.toString());
@@ -1133,6 +1283,16 @@ public class ProxyChannel {
 							close("Invalid receive (size = " + receiveSize + ")");
 							return;
 						}
+
+						if (receiveSize > maxKafkaRequestSizeBytes) {
+							log.error("[Channel {}] Request size {} exceeds maximum allowed size {}. " +
+									"Possible attack or misconfiguration from {}. Closing connection.",
+									this.channelId, receiveSize, maxKafkaRequestSizeBytes,
+									transportLayer.socketChannel().socket().getRemoteSocketAddress());
+							close("Request size " + receiveSize + " exceeds maximum limit of " + maxKafkaRequestSizeBytes);
+							return;
+						}
+
 						requestedBufferSize = receiveSize; // may be 0 for some payloads (SASL)
 						if (receiveSize == 0) {
 							buffer = EMPTY_BUFFER;
@@ -1232,19 +1392,20 @@ public class ProxyChannel {
 
 	// only call this from Reactor thread
 	void handleWorkEntry(ProxyReactor.WorkEntry workEntry) {
-		// Almost all of the work is ProduceAckState so check for that first
-		if (workEntry instanceof ProduceAckState) {
+        // Almost all of the work is ProduceAckState so check for that first
+        if (workEntry instanceof ProduceAckState) {
             inFlightRequestCount--;
             log.trace("[Channel {}] Handled ProduceAckState. In-flight: {}", this.channelId, inFlightRequestCount);
-			produceResponseProcesssing.handleProduceAckState((ProduceAckState) workEntry);
-		} else if (workEntry instanceof AuthorizationResult) {
+            produceResponseProcesssing.handleProduceAckState((ProduceAckState) workEntry);
+        } else if (workEntry instanceof AuthorizationResult) {
+            // This block should no longer be used by the SASL flow.
+            // It is kept for any other potential legacy use, but SASL is now self-contained.
+            log.warn("[Channel {}] Legacy AuthorizationResult processed. This should not be part of the SASL flow.", this.channelId);
             inFlightRequestCount--;
-            log.debug("[Channel {}] Handled AuthorizationResult. In-flight: {}", this.channelId, inFlightRequestCount);
-			AuthorizationResult authResult = (AuthorizationResult) workEntry;
-			final boolean worked = authResult.getWorked();
-			authorizationResult(authResult.getRequestHeader(), worked);
-            if (!worked) return; // if did not work then we are done as channel will be closed
-		} else if (workEntry instanceof FetchResponseResult) {
+            AuthorizationResult authResult = (AuthorizationResult) workEntry;
+            authorizationResult(authResult.getRequestHeader(), authResult.getWorked());
+            if (!authResult.getWorked()) return;
+        } else if (workEntry instanceof FetchResponseResult) {
             inFlightRequestCount--;
             FetchResponseResult fetchResult = (FetchResponseResult) workEntry;
             log.trace("[Channel {}] Handled FetchResponseResult (CorrId: {}). In-flight: {}", this.channelId, fetchResult.getRequestHeader().correlationId(), inFlightRequestCount);
@@ -1279,8 +1440,8 @@ public class ProxyChannel {
                     );
                     dataToSend(send, commitResult.getApiKey());
                 } else {
-                     log.error("[Channel {}] Async OFFSET_COMMIT task (CorrId: {}) failed critically, no response to send. Closing channel. Exception: {}",
-                              this.channelId, commitResult.getRequestHeader().correlationId(), commitResult.getException() != null ? commitResult.getException().getMessage() : "Unknown");
+                    log.error("[Channel {}] Async OFFSET_COMMIT task (CorrId: {}) failed critically, no response to send. Closing channel. Exception: {}",
+                                this.channelId, commitResult.getRequestHeader().correlationId(), commitResult.getException() != null ? commitResult.getException().getMessage() : "Unknown");
                     // Attempt to send a generic error if possible, otherwise close
                     // For OffsetCommit, getErrorResponse might not be directly available on the original request if it was already transformed.
                     // Consider a generic error response or closing.
@@ -1292,7 +1453,51 @@ public class ProxyChannel {
                 close("Could not send OFFSET_COMMIT response: " + e);
                 return;
             }
-		} else if (workEntry instanceof Close) {
+        } else if (workEntry instanceof SaslAuthenticateResponseResult) {
+            inFlightRequestCount--;
+            SaslAuthenticateResponseResult authResult = (SaslAuthenticateResponseResult) workEntry;
+            RequestHeader header = authResult.getRequestHeader(); // Can be null for raw SASL
+            log.trace("[Channel {}] Handled SaslAuthenticateResponseResult (CorrId: {}). In-flight: {}", this.channelId, (header != null ? header.correlationId() : "N/A"), inFlightRequestCount);
+
+            try {
+                if (authResult.getWorked()) {
+                    // Authentication succeeded
+                    this.session = authResult.getSession();
+                    proxySasl.setComplete(true);
+                }
+
+                // --- Build and send the response directly here ---
+                if (enableKafkaSaslAuthenticateHeaders) {
+                    // This flow uses Kafka headers
+                    if (header == null) {
+                        // This is a logic error, should not happen in this branch
+                        throw new IllegalStateException("RequestHeader is null in Kafka-header SASL flow.");
+                    }
+                    SaslAuthenticateResponseData responseData = new SaslAuthenticateResponseData()
+                            .setErrorCode(authResult.getWorked() ? Errors.NONE.code() : Errors.SASL_AUTHENTICATION_FAILED.code())
+                            .setAuthBytes(new byte[0])
+                            .setSessionLifetimeMs(0L);
+                    SaslAuthenticateResponse response = new SaslAuthenticateResponse(responseData);
+                    Send send = response.toSend(header.toResponseHeader(), header.apiVersion());
+                    dataToSend(send, ApiKeys.SASL_AUTHENTICATE);
+                } else {
+                    // This is the "raw" SASL flow without Kafka headers
+                    // We only send a response on success (an empty buffer). On failure, we just close.
+                    if (authResult.getWorked()) {
+                        Send netOutBuffer = ByteBufferSend.sizePrefixed(ByteBuffer.wrap(new byte[0]));
+                        dataToSend(netOutBuffer, ApiKeys.SASL_AUTHENTICATE);
+                    }
+                }
+
+                // If authentication failed, close the channel now that the error response has been sent.
+                if (!authResult.getWorked()) {
+                    close("due to authentication failure");
+				}
+            } catch (Exception e) {
+                log.error("[Channel {}] Exception handling SASL_AUTHENTICATE result (CorrId: {}): {}", this.channelId, (header != null ? header.correlationId() : "N/A"), e.getMessage(), e);
+                close("Error processing SASL result: " + e.getMessage());
+            }
+        } else if (workEntry instanceof Close) {
 			log.debug("[Channel {}] Handling Close work entry.", this.channelId);
 			final Close closeReq = (Close) workEntry;
 			close(closeReq.getReason());
@@ -1369,7 +1574,7 @@ private boolean performTLSValidation() throws IOException {
                 log.warn("Non-TLS connection detected on TLS port from {} - contentType: 0x{}, version: {}.{}", 
                     transportLayer.socketChannel().socket().getRemoteSocketAddress(),
                     String.format("%02X", contentType), majorVersion, minorVersion);
-                return false;
+                throw new IOException("Plaintext traffic detected on TLS port - potential security risk or misconfiguration");
             }
             
             // Validation passed - prepare buffer for normal SSL processing
@@ -1380,7 +1585,8 @@ private boolean performTLSValidation() throws IOException {
         
 		} catch (IOException e) {
 			// Re-throw IOException for caller to handle
-			throw new IOException("TLS validation failed: " + e.getMessage(), e);
+			// throw new IOException("TLS validation failed: " + e.getMessage(), e);
+			throw e;
 		} catch (Exception e) {
 			// Convert other exceptions to IOException
 			throw new IOException("Unexpected error during TLS validation: " + e.getMessage(), e);

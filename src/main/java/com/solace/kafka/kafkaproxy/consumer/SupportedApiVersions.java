@@ -41,22 +41,26 @@ public class SupportedApiVersions {
         apiVersions.put((short) 1, new VersionEntry((short) 1, (short) 8, (short) 16, "Fetch"));                // Fetch Channel
         apiVersions.put((short) 2, new VersionEntry((short) 2, (short) 4, (short) 8, "ListOffsets"));           // Fetch Channel
         apiVersions.put((short) 3, new VersionEntry((short) 3, (short) 7, (short) 12, "Metadata"));             // All Channels
+        // API Keys 4 --> 7 Currently not used by the proxy
         apiVersions.put((short) 8, new VersionEntry((short) 8, (short) 4, (short) 9, "OffsetCommit"));          // Group Channel
         apiVersions.put((short) 9, new VersionEntry((short) 9, (short) 5, (short) 9, "OffsetFetch"));           // Group Channel
         apiVersions.put((short) 10, new VersionEntry((short) 10, (short) 2, (short) 4, "FindCoordinator"));     // Metadata Channel
         apiVersions.put((short) 11, new VersionEntry((short) 11, (short) 4, (short) 9, "JoinGroup"));           // Group Channel
         apiVersions.put((short) 12, new VersionEntry((short) 12, (short) 2, (short) 4, "Heartbeat"));           // Group Channel
         apiVersions.put((short) 13, new VersionEntry((short) 13, (short) 2, (short) 5, "LeaveGroup"));          // Group Channel
-        apiVersions.put((short) 14, new VersionEntry((short) 14, (short) 3, (short) 5, "SyncGroup"));           // Group Channel
+        apiVersions.put((short) 14, new VersionEntry((short) 14, (short) 2, (short) 5, "SyncGroup"));           // Group Channel
+        // API Keys 15 --> 16 Currently not used by the proxy
         apiVersions.put((short) 15, new VersionEntry((short) 15, (short) 2, (short) 5, "DescribeGroups"));
         apiVersions.put((short) 16, new VersionEntry((short) 16, (short) 2, (short) 4, "ListGroups"));
         apiVersions.put((short) 17, new VersionEntry((short) 17, (short) 1, (short) 1, "SaslHandshake"));       // All Channels
-        apiVersions.put((short) 18, new VersionEntry((short) 18, (short) 0, (short) 3, "ApiVersions"));         // All Channels
+        apiVersions.put((short) 18, new VersionEntry((short) 18, (short) 0, (short) 4, "ApiVersions"));         // All Channels
+        // API Keys 19 --> 21 Currently not used by the proxy
         apiVersions.put((short) 19, new VersionEntry((short) 19, (short) 4, (short) 7, "CreateTopics"));
         apiVersions.put((short) 20, new VersionEntry((short) 20, (short) 3, (short) 6, "DeleteTopics"));
         apiVersions.put((short) 21, new VersionEntry((short) 21, (short) 1, (short) 2, "DeleteRecords"));
         apiVersions.put((short) 22, new VersionEntry((short) 22, (short) 1, (short) 4, "InitProducerId"));      // Produce Channel
         apiVersions.put((short) 23, new VersionEntry((short) 23, (short) 1, (short) 4, "OffsetForLeaderEpoch"));    // Fetch Channel
+        // API Keys 24 --> 35 Currently not used by the proxy
         apiVersions.put((short) 24, new VersionEntry((short) 24, (short) 1, (short) 4, "AddPartitionsToTxn"));
         apiVersions.put((short) 25, new VersionEntry((short) 25, (short) 1, (short) 3, "AddOffsetsToTxn"));
         apiVersions.put((short) 26, new VersionEntry((short) 26, (short) 1, (short) 3, "EndTxn"));

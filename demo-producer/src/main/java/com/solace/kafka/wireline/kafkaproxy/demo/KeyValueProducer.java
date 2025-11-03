@@ -37,6 +37,9 @@ import java.util.List;
 
 public class KeyValueProducer {
 
+    private static final int MAX_UNFLUSHED_MESSAGES_DEFAULT = 10;
+    private static final int MAX_UNFLUSHED_MESSAGES_MAX = 1_000;
+
     private static final Logger logger = LoggerFactory.getLogger(KeyValueProducer.class);
 
     public static void main(String[] args) {
@@ -48,6 +51,10 @@ public class KeyValueProducer {
         options.addOption("h", "help", false, "Print this help message");
         options.addOption("d", "delay", true, "Delay between messages in milliseconds");
         options.addOption("n", "num-records", true, "Total number of records to produce");
+        options.addOption("l", "client-id", true, "Kafka client ID for the producer");
+        options.addOption("u", "max-unflushed", true, String.format("Maximum number of unflushed messages before a flush (default %d, max %d)", MAX_UNFLUSHED_MESSAGES_DEFAULT, MAX_UNFLUSHED_MESSAGES_MAX));
+        options.addOption("g", "gen-key", false, "Generate incrementing keys instead of reading from file");
+        options.addOption("s", "gen-key-start", true, "Starting value for generated keys (default 0). Does nothing if -g not set.");
 
         CommandLineParser parser = new DefaultParser();
         HelpFormatter formatter = new HelpFormatter();
@@ -83,6 +90,7 @@ public class KeyValueProducer {
         String configFilePath = cmd.getOptionValue("c");
         String topicName = cmd.getOptionValue("t");
         String inputFilePath = cmd.getOptionValue("i");
+        String clientId = cmd.getOptionValue("l");
         int delay = 0;
         long numRecords = -1;
 
@@ -118,6 +126,44 @@ public class KeyValueProducer {
             }
         }
 
+        int maxUnflushed = MAX_UNFLUSHED_MESSAGES_DEFAULT;
+        if (cmd.hasOption("u")) {
+            try {
+                maxUnflushed = Integer.parseInt(cmd.getOptionValue("u"));
+                if (maxUnflushed <= 0 || maxUnflushed > MAX_UNFLUSHED_MESSAGES_MAX) {
+                    System.err.println("Maximum unflushed messages must be between 1 and 1000. Using default of " + MAX_UNFLUSHED_MESSAGES_DEFAULT);
+                } else {
+                    // This variable is not currently used, but could be integrated into the sending logic if desired
+                    // maxUnflushedMessages = maxUnflushed;
+                }
+            } catch (NumberFormatException e) {
+                logger.error("Invalid maximum unflushed messages value: {}", cmd.getOptionValue("u"));
+                System.err.println("Invalid maximum unflushed messages value: " + cmd.getOptionValue("u"));
+                System.exit(1);
+                return;
+            }
+        }
+        final int maxUnflushedMessages = maxUnflushed;
+
+        final boolean generateKeys = cmd.hasOption("g");
+        long gks = 0;
+        if (generateKeys && cmd.hasOption("s")) {
+            try {
+                gks = Long.parseLong(cmd.getOptionValue("s"));
+                if (gks < 0) {
+                    System.err.println("Generated key starting value must be a non-negative number.");
+                    System.exit(1);
+                    return;
+                }
+            } catch (NumberFormatException e) {
+                logger.error("Invalid generated key starting value: {}", cmd.getOptionValue("s"));
+                System.err.println("Invalid generated key starting value: " + cmd.getOptionValue("s"));
+                System.exit(1);
+                return;
+            }
+        }
+        final long genKeyStart = gks;
+
         Properties properties = new Properties();
         try (FileInputStream input = new FileInputStream(configFilePath)) {
             properties.load(input);
@@ -132,10 +178,17 @@ public class KeyValueProducer {
         // Override properties from command line
         properties.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         properties.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        
+        // Set client ID if provided
+        if (clientId != null && !clientId.trim().isEmpty()) {
+            properties.setProperty(ProducerConfig.CLIENT_ID_CONFIG, clientId);
+            logger.info("Using client ID: {}", clientId);
+        }
+        final String formattedClientId = String.format("%-8.8s", (clientId != null && !clientId.trim().isEmpty()) ? clientId : "default");
 
         long totalMessagesSent = 0;
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(properties);
-             BufferedReader reader = new BufferedReader(new FileReader(inputFilePath))) {
+            BufferedReader reader = new BufferedReader(new FileReader(inputFilePath))) {
 
             List<String> lines = new ArrayList<>();
 
@@ -155,6 +208,7 @@ public class KeyValueProducer {
 
             logger.info("Starting to send messages to topic '{}'. Press Ctrl+C to exit.", topicName);
             int lineIndex = 0;
+            int unflushedCount = 0;
 
             // Main loop for sending messages
             while (true) {
@@ -177,21 +231,46 @@ public class KeyValueProducer {
                 } else {
                     v = line;
                 }
+                if (generateKeys) {
+                    k = String.valueOf(genKeyStart + totalMessagesSent);
+                }
+                if (k != null && k.isEmpty()) k = null;
+                if (v == null || v.isEmpty()) {
+                    v = "VALUE-" + UUID.randomUUID().toString();
+                }
+
                 final String key = k, value = v;
                 final ProducerRecord<String, String> record = new ProducerRecord<>(topicName, key, value);
                 final long sentCount = totalMessagesSent;
+                int nodeId = -1;
+                try {
+                    nodeId = producer.partitionsFor(topicName).get(0).leader().id();
+                } catch (Exception e) {
+                    logger.warn("Error getting leader node ID for topic {}: {}", topicName, e.getMessage());
+                }
+                final String nodeIdStr = (nodeId != -1) ? String.valueOf(nodeId) : "X";
                 producer.send(record, (metadata, exception) -> {
                     if (exception == null) {
                         // Log less verbosely for successful sends, or use TRACE/DEBUG
-                        logger.info("SENT {} : {} - {}",
-                                key, String.format("%.50s", value), String.format("%06d", sentCount));
+                        String paddedKey = String.format("%-10.10s", key != null ? key : "null");
+                        String paddedValue = String.format("%-50.50s", value);
+                        System.out.printf("--> %s - %s [%s] N[%s] C[%s]%n",
+                                paddedKey, paddedValue, String.format("%06d", sentCount), nodeIdStr, formattedClientId);
                     } else {
                         logger.error("Error sending record (key={}, value={})", key, value, exception);
                         // If the send error is due to an interruption, the main loop's interrupt check will handle it.
                     }
                 });
                 totalMessagesSent++;
-                
+                unflushedCount++;
+                                
+                // producer.partitionsFor(topicName).get(0).leader().id(); // Dummy call to potentially trigger an exception if the producer is closed
+
+                if (unflushedCount >= maxUnflushedMessages) {
+                    producer.flush();
+                    unflushedCount = 0;
+                }
+
                 if (delay > 0) {
                     try {
                         Thread.sleep(delay);

@@ -1,0 +1,320 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka-wireline-proxy
+  namespace: kafka-proxy
+spec:
+<<<<<<< HEAD
+  serviceName: "kafka-wireline-proxy"
+  replicas: 2  # Add replicas for HA
+=======
+  # Use a headless service for stable DNS names
+  serviceName: kafka-wireline-proxy-headless
+  replicas: 2
+>>>>>>> origin/beta-fixes-and-enhancements-1
+  selector:
+    matchLabels:
+      app: kafka-wireline-proxy
+  template:
+    metadata:
+      labels:
+        app: kafka-wireline-proxy
+    spec:
+      # AKS-specific: Add node selector for consistent placement
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # AKS-specific: Security context for non-root execution
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - kafka-wireline-proxy
+                topologyKey: kubernetes.io/hostname
+          ### For AKS with multiple availability zones, use this for zone distribution
+          # preferredDuringSchedulingIgnoredDuringExecution:
+          #   - weight: 100
+          #     podAffinityTerm:
+          #       labelSelector:
+          #         matchExpressions:
+          #           - key: app
+          #             operator: In
+          #             values:
+          #               - kafka-wireline-proxy
+          #       topologyKey: topology.kubernetes.io/zone
+      
+      containers:
+        - name: kafka-wireline-proxy
+<<<<<<< HEAD
+          image: your-registry/kafka-wireline-proxy:latest
+          ports:
+            - containerPort: 9092
+              name: plaintext
+            - containerPort: 9094
+              name: sasl-ssl
+            - containerPort: 8080
+              name: health
+          
+          # Add proper resource limits based on __dev-aks-deploy/proxy-sts.yaml
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+              ephemeral-storage: "1Gi"
+            limits:
+              memory: "1536Mi"  # Increase from 1Gi to handle memory issues
+              cpu: "1000m"
+              ephemeral-storage: "1Gi"
+          
+          # Add JVM memory settings to prevent OOM
+          env:
+            - name: JAVA_OPTS
+              value: "-Xms512m -Xmx1536m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+            - name: MAX_REQUEST_SIZE_BYTES
+              value: "104857600"  # 100MB limit for request size validation
+          
+          envFrom:
+            - configMapRef:
+                name: proxy-config
+            - secretRef:
+                name: solace-credentials
+          
+          # Add health checks
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          
+          # Add security context
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+=======
+          image: ghcr.io/solacelabs/kafka-client-proxy-to-solace:latest
+          imagePullPolicy: Always
+          
+          # AKS-specific: Container security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # Set to true if app supports it
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 1000
+          
+          env:
+            # AKS-specific: Increased memory for better stability
+            - name: JAVA_OPTS
+              value: "-Xms512m -Xmx1g -XX:MaxMetaspaceSize=256m -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 -Dlog4j.configurationFile=/app/log4j2.xml"
+              
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094"
+            
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            
+            # AKS-specific: Add pod IP for internal resolution
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+                  
+            # AKS-specific: Add namespace for FQDN resolution
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+            # EXTERNAL_LB_HOSTNAMES_LIST - Update this after creating instance load balancers
+            # Replace with actual external IPs from: kubectl get svc -n kafka-proxy | grep instance-lb
+            # Format: ip1:9094,ip2:9094
+            - name: EXTERNAL_LB_HOSTNAMES_LIST
+              value: "REPLACE_WITH_ACTUAL_LB_HOST_LIST" # Update after load balancer creation
+            
+            # AKS-specific: Keystore configuration
+            - name: KAFKA_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-keystore-password
+                  key: KAFKA_KEYSTORE_PASSWORD
+            
+            # AKS-specific: Optional Solace connection settings
+            # Uncomment and configure for your Solace broker
+            # - name: SOLACE_HOST
+            #   value: "tcps://your-solace-broker:55443"
+            # - name: SOLACE_VPN_NAME
+            #   value: "default"
+            # - name: SOLACE_USERNAME
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: solace-credentials
+            #       key: username
+            # - name: SOLACE_PASSWORD
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: solace-credentials
+            #       key: password
+            
+          ports:
+            - name: kafka-plaintext
+              containerPort: 9092
+              protocol: TCP
+            - name: kafka-ssl
+              containerPort: 9094
+              protocol: TCP
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          
+          # AKS-specific: Enhanced health checks
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+              scheme: HTTP
+            initialDelaySeconds: 60  # Increased for AKS
+            periodSeconds: 30
+            timeoutSeconds: 10       # Increased timeout
+            failureThreshold: 3
+            successThreshold: 1
+            
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+              scheme: HTTP
+            initialDelaySeconds: 30  # Increased for AKS
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3      # Increased for better stability
+            successThreshold: 1
+            
+          # AKS-specific: Startup probe for slow-starting containers
+          startupProbe:
+            httpGet:
+              path: /health
+              port: health
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30     # Allow up to 5 minutes for startup
+            successThreshold: 1
+>>>>>>> origin/beta-fixes-and-enhancements-1
+          
+          volumeMounts:
+            - name: kafka-keystore-volume
+              mountPath: /app/keystore
+              subPath: keystore
+              readOnly: true
+            - name: proxy-config-volume
+              mountPath: /app/proxy.properties
+              subPath: proxy.properties
+              readOnly: true
+            - name: log4j2-config-volume
+              mountPath: /app/log4j2.xml
+              subPath: log4j2.xml
+              readOnly: true
+            # AKS-specific: Temp volume for heap dumps
+            - name: tmp-volume
+              mountPath: /tmp
+              
+<<<<<<< HEAD
+=======
+          resources:
+            limits:
+              memory: "1536Mi"
+              cpu: "1"
+              ephemeral-storage: "2Gi"
+            requests:
+              memory: "1536Mi"
+              cpu: "1"
+              ephemeral-storage: "1Gi"
+>>>>>>> origin/beta-fixes-and-enhancements-1
+      volumes:
+        - name: kafka-keystore-volume
+          secret:
+            secretName: kafka-keystore
+            defaultMode: 0444        # Read-only permissions
+        - name: proxy-config-volume
+          configMap:
+            name: kafka-proxy-config
+            defaultMode: 0444        # Read-only permissions
+        - name: log4j2-config-volume
+          configMap:
+            name: log4j2-config
+            defaultMode: 0444        # Read-only permissions
+        - name: tmp-volume
+          emptyDir:
+            sizeLimit: 1Gi          # Limit temp storage
+
+      # AKS-specific: Resource optimization
+      terminationGracePeriodSeconds: 60
+      
+      # AKS-specific: DNS configuration for better resolution
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+          - name: edns0
+
+---
+# Headless service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-wireline-proxy-headless
+  namespace: kafka-proxy
+  # AKS-specific: Add labels for better organization
+  labels:
+    app: kafka-wireline-proxy
+    service-type: headless
+spec:
+  clusterIP: None
+  selector:
+    app: kafka-wireline-proxy
+  ports:
+    - name: kafka-plaintext
+      port: 9092
+      targetPort: 9092
+      protocol: TCP
+    - name: kafka-ssl
+      port: 9094
+      targetPort: 9094
+      protocol: TCP
+    # AKS-specific: Add health port for internal monitoring
+    - name: health
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  # AKS-specific: Enable internal DNS resolution
+  publishNotReadyAddresses: true

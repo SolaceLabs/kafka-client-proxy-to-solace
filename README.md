@@ -1,10 +1,14 @@
-# Kafka Proxy for Solace Event brokers
+# Kafka Proxy for Solace
 
+<<<<<<< HEAD
 A high-performance proxy that allows Kafka clients to publish and subscribe to a Solace event broker without any changes to the Kafka client application.
+=======
+A high-performance proxy that allows Kafka clients to publish and subscribe to a Solace Event Broker without any changes to the Kafka client application.
+>>>>>>> origin/beta-fixes-and-enhancements-1
 
 ## Description
 
-This project enables Kafka client applications to seamlessly produce and consume messages from the Solace event mesh via the proxy. The proxy speaks the native Kafka wireline protocol to Kafka client applications and the Solace SMF protocol to the Solace Event Broker.
+This project enables Kafka client applications to seamlessly produce and consume messages from Solace via the proxy. The proxy speaks the native Kafka wireline protocol to Kafka client applications and the Solace SMF protocol to the Event Brokers.
 
 **Key Features:**
 - **Protocol Translation**: Transparent conversion between Kafka wireline protocol and Solace SMF
@@ -13,10 +17,13 @@ This project enables Kafka client applications to seamlessly produce and consume
 - **Security**: Comprehensive SSL/TLS and mTLS support for both Kafka clients and Solace connections
 - **Kubernetes Ready**: Production-ready deployment configurations for AWS EKS
 
+<<<<<<< HEAD
 For producers, Kafka topics can be published to the Solace Event Mesh unmodified, or converted to hierarchical Solace topics by splitting on specified characters.
 
 For consumers, the proxy manages consumer groups and topic subscriptions, mapping them to Solace queues and topic subscriptions with configurable queue naming strategies.
 
+=======
+>>>>>>> origin/beta-fixes-and-enhancements-1
 ## Getting Started
 
 ### Dependencies
@@ -228,13 +235,29 @@ The Kafka Proxy takes one command line argument: a properties file to configure 
 | `ssl.keystore.location` | Path to the keystore file containing the server's SSL certificate (PKCS12 or JKS format) | | ✅ (for SSL) |
 | `ssl.keystore.password` | Password for the keystore file. Supports environment variable resolution: `${env:KAFKA_KEYSTORE_PASSWORD}` | | ✅ (for SSL) |
 | `ssl.keystore.type` | Format of the keystore file. Valid values: `JKS`, `PKCS12` | `JKS` | |
+<<<<<<< HEAD
+<<<<<<< HEAD
 | `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. **Note: Use TLSv1.2 for compatibility with Solace brokers.** Example: `TLSv1.2` or `TLSv1.2,TLSv1.1` | `TLSv1.2` | |
+=======
+| `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. **Note: Use TLSv1.2 for compatibility with the Solace Event Broker.** Example: `TLSv1.2` or `TLSv1.2,TLSv1.1` | `TLSv1.2` | |
+>>>>>>> bb82323 (changes to readme)
+=======
+| `ssl.enabled.protocols` | Comma-separated list of TLS protocols to enable. **Note: Use TLSv1.2 for compatibility with the Solace Event Broker.** Example: `TLSv1.2` or `TLSv1.2,TLSv1.1` | `TLSv1.2` | |
+>>>>>>> origin/beta-fixes-and-enhancements-1
 | `ssl.cipher.suites` | Comma-separated list of SSL cipher suites to enable | JVM defaults | |
 | `ssl.protocol` | SSL protocol to use. Valid values: `TLS`, `TLSv1.1`, `TLSv1.2`, `TLSv1.3` | `TLS` | |
 
 **Recommended SSL Configuration:**
 ```properties
+<<<<<<< HEAD
+<<<<<<< HEAD
 # Recommended for compatibility with Solace brokers
+=======
+# Recommended for compatibility with the Solace Event Broker
+>>>>>>> bb82323 (changes to readme)
+=======
+# Recommended for compatibility with the Solace Event Broker
+>>>>>>> origin/beta-fixes-and-enhancements-1
 ssl.enabled.protocols=TLSv1.2
 
 # For broader client compatibility (if needed)
@@ -255,7 +278,7 @@ These properties enable client certificate verification for enhanced security:
 | `ssl.truststore.password` | Password for the truststore file | | ✅ (for mTLS) |
 | `ssl.truststore.type` | Format of the truststore file. Valid values: `JKS`, `PKCS12` | `JKS` | |
 
-### Solace Broker Connection Settings
+### Solace Event Broker Connection Settings
 
 All Solace connection properties use the `solace.` prefix to prevent conflicts with Kafka properties.
 
@@ -450,10 +473,36 @@ The demo includes separate Java producer and consumer applications with their ow
 
 ### Health Endpoints
 
-When `proxy.healthcheckserver.create=true`:
+When `proxy.healthcheckserver.create=true`, the following endpoint is available:
 
-- **`/health`**: Overall proxy health status
-- **`/ready`**: Readiness for traffic (Kubernetes readiness probe)
+```bash
+# Health check endpoint - returns 200 OK when proxy is healthy
+curl http://proxy-host:8080/health
+
+# Response: HTTP 200 OK with "OK" body when healthy
+# Response: HTTP 503 Service Unavailable when unhealthy
+```
+
+**Kubernetes Health Check Configuration:**
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+  
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 2
+```
 
 ### Logging
 
@@ -535,7 +584,11 @@ For issues and questions:
 
 ## Usage
 
+<<<<<<< HEAD
 This section describes how Kafka client applications connect to the proxy and how messages flow between Kafka clients and Solace brokers.
+=======
+This section describes how Kafka client applications connect to the proxy and how messages flow between Kafka clients and Solace Event Brokers.
+>>>>>>> origin/beta-fixes-and-enhancements-1
 
 ### Kafka Client Connection
 
@@ -842,4 +895,48 @@ proxy.partitions.per.topic=20
 - **No transactions**: Kafka transaction semantics not supported
 - **Consumer commits**: Mapped to Solace message acknowledgments
 
-This usage model allows existing Kafka applications to seamlessly publish and consume messages through the Solace broker without any code changes, while taking advantage of Solace's hierarchical topics and flexible routing capabilities.
+<<<<<<< HEAD
+## Security Features
+
+### Request Size Protection
+
+The proxy includes built-in protection against memory exhaustion attacks:
+
+```properties
+# Maximum request size limit (prevents OutOfMemoryError)
+proxy.max.request.size.bytes=104857600  # 100MB default
+
+# Automatic rejection of oversized requests
+# Logs security events for monitoring suspicious activity
+```
+
+### SSL/TLS Connection Validation
+
+- **Plaintext Detection**: Automatically detects and rejects plaintext traffic on SSL ports
+- **Protocol Validation**: Validates TLS handshake to prevent memory vulnerabilities  
+- **Connection Monitoring**: Logs suspicious connection attempts for security analysis
+- **Immediate Connection Termination**: Closes invalid connections to prevent resource exhaustion
+
+### Security Event Logging
+
+The proxy logs security-relevant events for monitoring:
+
+```log
+# Examples of security event logs:
+[SECURITY][Channel 1] OVERSIZED_REQUEST from /192.168.1.100:45123 - size=2147483647, limit=104857600
+[SECURITY][Channel 2] PLAINTEXT_ON_SSL_PORT from /10.0.1.50:33445 - detected non-TLS traffic on port 9094
+```
+
+### Production JVM Security Configuration
+
+```bash
+# Recommended production JVM settings for security and stability
+java -Xms512m -Xmx2g -XX:+UseG1GC \
+     -XX:MaxGCPauseMillis=200 \
+     -XX:+DisableExplicitGC \
+     -Djava.security.egd=file:/dev/./urandom \
+     -jar kafka-wireline-proxy-*.jar proxy.properties
+```
+=======
+This usage model allows existing Kafka applications to seamlessly publish and consume messages through Solace without any code changes, while taking advantage of Solace's hierarchical topics and flexible routing capabilities.
+>>>>>>> origin/beta-fixes-and-enhancements-1
