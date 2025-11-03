@@ -5,8 +5,14 @@ metadata:
   name: kafka-wireline-proxy
   namespace: kafka-proxy
 spec:
+<<<<<<< HEAD
   serviceName: "kafka-wireline-proxy"
   replicas: 2  # Add replicas for HA
+=======
+  # Use a headless service for stable DNS names
+  serviceName: kafka-wireline-proxy-headless
+  replicas: 2
+>>>>>>> origin/beta-fixes-and-enhancements-1
   selector:
     matchLabels:
       app: kafka-wireline-proxy
@@ -54,6 +60,7 @@ spec:
       
       containers:
         - name: kafka-wireline-proxy
+<<<<<<< HEAD
           image: your-registry/kafka-wireline-proxy:latest
           ports:
             - containerPort: 9092
@@ -107,6 +114,121 @@ spec:
             runAsNonRoot: true
             runAsUser: 1000
             allowPrivilegeEscalation: false
+=======
+          image: ghcr.io/solacelabs/kafka-client-proxy-to-solace:latest
+          imagePullPolicy: Always
+          
+          # AKS-specific: Container security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # Set to true if app supports it
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 1000
+          
+          env:
+            # AKS-specific: Increased memory for better stability
+            - name: JAVA_OPTS
+              value: "-Xms512m -Xmx1g -XX:MaxMetaspaceSize=256m -XX:+UseG1GC -XX:MaxHeapFreeRatio=40 -XX:G1HeapWastePercent=10 -Dlog4j.configurationFile=/app/log4j2.xml"
+              
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9094"
+            
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            
+            # AKS-specific: Add pod IP for internal resolution
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+                  
+            # AKS-specific: Add namespace for FQDN resolution
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+            # EXTERNAL_LB_HOSTNAMES_LIST - Update this after creating instance load balancers
+            # Replace with actual external IPs from: kubectl get svc -n kafka-proxy | grep instance-lb
+            # Format: ip1:9094,ip2:9094
+            - name: EXTERNAL_LB_HOSTNAMES_LIST
+              value: "REPLACE_WITH_ACTUAL_LB_HOST_LIST" # Update after load balancer creation
+            
+            # AKS-specific: Keystore configuration
+            - name: KAFKA_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-keystore-password
+                  key: KAFKA_KEYSTORE_PASSWORD
+            
+            # AKS-specific: Optional Solace connection settings
+            # Uncomment and configure for your Solace broker
+            # - name: SOLACE_HOST
+            #   value: "tcps://your-solace-broker:55443"
+            # - name: SOLACE_VPN_NAME
+            #   value: "default"
+            # - name: SOLACE_USERNAME
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: solace-credentials
+            #       key: username
+            # - name: SOLACE_PASSWORD
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: solace-credentials
+            #       key: password
+            
+          ports:
+            - name: kafka-plaintext
+              containerPort: 9092
+              protocol: TCP
+            - name: kafka-ssl
+              containerPort: 9094
+              protocol: TCP
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          
+          # AKS-specific: Enhanced health checks
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+              scheme: HTTP
+            initialDelaySeconds: 60  # Increased for AKS
+            periodSeconds: 30
+            timeoutSeconds: 10       # Increased timeout
+            failureThreshold: 3
+            successThreshold: 1
+            
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+              scheme: HTTP
+            initialDelaySeconds: 30  # Increased for AKS
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3      # Increased for better stability
+            successThreshold: 1
+            
+          # AKS-specific: Startup probe for slow-starting containers
+          startupProbe:
+            httpGet:
+              path: /health
+              port: health
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30     # Allow up to 5 minutes for startup
+            successThreshold: 1
+>>>>>>> origin/beta-fixes-and-enhancements-1
           
           volumeMounts:
             - name: kafka-keystore-volume
@@ -125,6 +247,18 @@ spec:
             - name: tmp-volume
               mountPath: /tmp
               
+<<<<<<< HEAD
+=======
+          resources:
+            limits:
+              memory: "1536Mi"
+              cpu: "1"
+              ephemeral-storage: "2Gi"
+            requests:
+              memory: "1536Mi"
+              cpu: "1"
+              ephemeral-storage: "1Gi"
+>>>>>>> origin/beta-fixes-and-enhancements-1
       volumes:
         - name: kafka-keystore-volume
           secret:

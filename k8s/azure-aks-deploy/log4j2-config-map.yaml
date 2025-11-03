@@ -19,15 +19,23 @@ data:
             <Console name="Console" target="SYSTEM_OUT">
                 <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{1} - %msg%n"/>
             </Console>
+<<<<<<< HEAD
             <!-- Uncomment the following element to enable file logging -->
+=======
+>>>>>>> origin/beta-fixes-and-enhancements-1
             <!-- <File name="File" fileName="logs/application.log">
                 <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{1} - %msg%n"/>
             </File> -->
         </Appenders>
         <Loggers>
+<<<<<<< HEAD
             <Root level="INFO">
                 <AppenderRef ref="Console"/>
                 <!-- Uncomment the following element to enable file logging -->
+=======
+            <Root level="debug">
+                <AppenderRef ref="Console"/>
+>>>>>>> origin/beta-fixes-and-enhancements-1
                 <!-- <AppenderRef ref="File"/> -->
             </Root>
         </Loggers>

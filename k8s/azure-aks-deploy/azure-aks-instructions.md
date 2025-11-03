@@ -8,6 +8,10 @@ This document provides comprehensive instructions for deploying the Kafka Wireli
 - kubectl installed
 - Docker installed (for building custom images if needed)
 - Azure subscription with sufficient permissions
+<<<<<<< HEAD
+=======
+- Helm for advanced/production deployment options
+>>>>>>> origin/beta-fixes-and-enhancements-1
 
 ## 1. Azure Setup
 Skip this section if Azure CLI is already set up. You should ensure that you are logged into the CLI using commands shown below.
