@@ -290,7 +290,7 @@ public class ProxyConfig  extends AbstractConfig {
     
     public static String resolvePropertyValueFromEnv(final String propertyValue) throws ConfigException{
         if (propertyValue == null || propertyValue.isEmpty()) {
-            return null;
+            return "";
         }
 
         final Matcher matcher = PATTERN.matcher(propertyValue);
