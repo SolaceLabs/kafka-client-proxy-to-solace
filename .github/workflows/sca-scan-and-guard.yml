@@ -19,6 +19,7 @@ jobs:
     uses: SolaceDev/solace-public-workflows/.github/workflows/sca-scan-and-guard.yaml@main
     with:
       setup_actions: '["setup-java", "maven-settings"]'
+      java_distribution: temurin
     secrets:
       FOSSA_API_KEY: ${{ secrets.FOSSA_API_KEY }}
 
