@@ -1,0 +1,21 @@
+version: 3
+project:
+  locator: SolaceLabs_kafka-client-proxy-to-solace
+  id: SolaceLabs_kafka-client-proxy-to-solace
+  name: kafka-client-proxy-to-solace
+  teams: []
+  labels:
+    - java
+vendoredDependencies:
+  forceRescans: false
+  scanMethod: CLILicenseScan
+  licenseScanPathFilters:
+    exclude:
+      - "./.git"
+      - "./.github"
+paths:
+  exclude:
+    - ./.git
+    - ./.github
+telemetry:
+  scope: full
