@@ -41,7 +41,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <!-- Kafka Library Version -->
-    <kafka.version>3.9.1</kafka.version>
+    <kafka.version>3.9.2</kafka.version>
 
     <!-- Solace JCSMP Library Version -->
     <solace.jcsmp.version>10.27.2</solace.jcsmp.version>
